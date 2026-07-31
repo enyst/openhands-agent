@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { InMemorySecretStore, llmProviderSecretRef } from '../../secrets/index.js';
+import { ToolDefinition } from '../../tool/index.js';
 import { textContent } from '../index.js';
 import { AnthropicMessagesClient, buildAnthropicMessagesBody, createAnthropicClientFromProfile, llmProfileSchema } from '../anthropic.js';
 
@@ -108,26 +110,175 @@ describe('profile-resolved Anthropic Messages client', () => {
   });
 });
 
+describe('Anthropic native tool calling', () => {
+  const testTool = new ToolDefinition({
+    name: 'get_weather',
+    description: 'Get the current weather for a location',
+    inputSchema: z.object({ location: z.string() }),
+    executor: async () => ({ content: 'sunny' }),
+  });
+
+  it('serializes tools to Anthropic native format', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const messages = [{ role: 'user' as const, content: [textContent('What is the weather?')] }];
+
+    const body = buildAnthropicMessagesBody(profile, messages, [testTool]);
+
+    expect(body.tools).toMatchObject([
+      {
+        name: 'get_weather',
+        description: 'Get the current weather for a location',
+        input_schema: { type: 'object', properties: { location: { type: 'string' } }, required: ['location'] },
+      },
+    ]);
+    expect(body.tool_choice).toEqual({ type: 'auto' });
+  });
+
+  it('omits tools field when no tools are provided', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const messages = [{ role: 'user' as const, content: [textContent('Hello')] }];
+
+    const body = buildAnthropicMessagesBody(profile, messages, []);
+
+    expect(body).not.toHaveProperty('tools');
+    expect(body).not.toHaveProperty('tool_choice');
+  });
+
+  it('parses tool_use blocks into MessageToolCall records', async () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const store = new InMemorySecretStore([[llmProviderSecretRef('anthropic'), 'anthropic-key']]);
+    const client = await createAnthropicClientFromProfile(
+      profile,
+      store,
+      {
+        fetch: fakeAnthropicFetch({
+          content: [
+            { type: 'text', text: 'Let me check the weather.' },
+            { type: 'tool_use', id: 'toolu_01A', name: 'get_weather', input: { location: 'San Francisco' } },
+          ],
+        }),
+      },
+    );
+
+    const result = await client.complete([{ role: 'user', content: [textContent('What is the weather in SF?')] }], [testTool]);
+
+    expect(result.message.role).toBe('assistant');
+    expect(result.message.content).toEqual([textContent('Let me check the weather.')]);
+    expect(result.message.tool_calls).toEqual([
+      {
+        id: 'toolu_01A',
+        responses_item_id: null,
+        name: 'get_weather',
+        arguments: '{"location":"San Francisco"}',
+        origin: 'completion',
+      },
+    ]);
+  });
+
+  it('handles multiple parallel tool calls', async () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const store = new InMemorySecretStore([[llmProviderSecretRef('anthropic'), 'anthropic-key']]);
+    const secondTool = new ToolDefinition({
+      name: 'get_time',
+      description: 'Get the current time',
+      inputSchema: z.object({}),
+      executor: async () => ({ content: '12:00' }),
+    });
+    const client = await createAnthropicClientFromProfile(
+      profile,
+      store,
+      {
+        fetch: fakeAnthropicFetch({
+          content: [
+            { type: 'tool_use', id: 'toolu_01A', name: 'get_weather', input: { location: 'NYC' } },
+            { type: 'tool_use', id: 'toolu_01B', name: 'get_time', input: {} },
+          ],
+        }),
+      },
+    );
+
+    const result = await client.complete([{ role: 'user', content: [textContent('Weather and time?')] }], [testTool, secondTool]);
+
+    expect(result.message.tool_calls).toHaveLength(2);
+    expect(result.message.tool_calls?.[0]?.name).toBe('get_weather');
+    expect(result.message.tool_calls?.[1]?.name).toBe('get_time');
+  });
+
+  it('serializes tool result continuation correctly', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const messages = [
+      { role: 'user' as const, content: [textContent('What is the weather?')] },
+      {
+        role: 'assistant' as const,
+        content: [textContent('Let me check.')],
+        tool_calls: [{ id: 'toolu_01A', responses_item_id: null, name: 'get_weather', arguments: '{"location":"SF"}', origin: 'completion' as const }],
+      },
+      { role: 'tool' as const, tool_call_id: 'toolu_01A', name: 'get_weather', content: [textContent('72°F and sunny')] },
+    ];
+
+    const body = buildAnthropicMessagesBody(profile, messages, [testTool]);
+
+    expect(body.messages).toHaveLength(3);
+    expect(body.messages[1]).toEqual({
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'Let me check.' },
+        { type: 'tool_use', id: 'toolu_01A', name: 'get_weather', input: { location: 'SF' } },
+      ],
+    });
+    expect(body.messages[2]).toEqual({
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'toolu_01A', content: '72°F and sunny' }],
+    });
+  });
+
+  it('handles invalid tool arguments gracefully', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: [],
+        tool_calls: [{ id: 'toolu_01A', responses_item_id: null, name: 'get_weather', arguments: 'not valid json', origin: 'completion' as const }],
+      },
+    ];
+
+    const body = buildAnthropicMessagesBody(profile, messages, [testTool]);
+
+    expect(body.messages[0]?.content).toContainEqual({
+      type: 'tool_use',
+      id: 'toolu_01A',
+      name: 'get_weather',
+      input: 'not valid json',
+    });
+  });
+});
+
 interface FakeFetchCall {
   readonly url: string;
   readonly headers: Record<string, string>;
   readonly body: Record<string, unknown>;
 }
 
-function fakeAnthropicFetch(response: { text: string }, calls: FakeFetchCall[] = []) {
+type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'thinking'; thinking: string; signature?: string };
+
+function fakeAnthropicFetch(response: { text: string } | { content: readonly AnthropicContentBlock[] }, calls: FakeFetchCall[] = []) {
   return async (url: string, init: { headers: Readonly<Record<string, string>>; body: string }) => {
     calls.push({
       url,
       headers: normalizeHeaders(init.headers),
       body: JSON.parse(init.body) as Record<string, unknown>,
     });
+    const content = 'text' in response ? [{ type: 'text' as const, text: response.text }] : response.content;
     return {
       ok: true,
       status: 200,
       async json() {
         return {
           role: 'assistant',
-          content: [{ type: 'text', text: response.text }],
+          content,
           usage: { input_tokens: 11, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
         };
       },

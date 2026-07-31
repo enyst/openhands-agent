@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { getLlmApiKey } from '../secrets/index.js';
 import type { SecretStore } from '../secrets/index.js';
+import type { ToolDefinition } from '../tool/index.js';
 import { llmCompletionResponseSchema, type FetchLike, type LLMClient, type LLMCompletionResponse } from './client.js';
 import { contentToString, messageSchema, reduceTextContent, type Content, type LLMProfile, type Message, type MessageToolCall } from './index.js';
 import { getAnthropicThinkingBudget, normalizeGenerationParamsForModel, supportsPromptCaching } from './provider-quirks.js';
@@ -28,8 +29,8 @@ export class AnthropicMessagesClient implements LLMClient {
     this.fetchImpl = fetchImpl;
   }
 
-  async complete(messages: readonly Message[]): Promise<LLMCompletionResponse> {
-    const body = buildAnthropicMessagesBody(this.profile, messages);
+  async complete(messages: readonly Message[], tools?: readonly ToolDefinition[]): Promise<LLMCompletionResponse> {
+    const body = buildAnthropicMessagesBody(this.profile, messages, tools);
     const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/v1/messages`, {
       method: 'POST',
       headers: buildHeaders(this.profile, this.apiKey),
@@ -66,7 +67,7 @@ export async function createAnthropicClientFromProfile(
   return new AnthropicMessagesClient(profile, apiKey, options.fetch ?? defaultFetch);
 }
 
-export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readonly Message[]): Record<string, unknown> {
+export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readonly Message[], tools?: readonly ToolDefinition[]): Record<string, unknown> {
   const normalizedProfile = normalizeGenerationParamsForModel(profile);
   const parsedMessages = messages.map((message) => messageSchema.parse(message));
   const systemMessages = parsedMessages.filter((message) => message.role === 'system');
@@ -84,6 +85,10 @@ export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readon
       ? [{ type: 'text', text: system.join('\n'), cache_control: { type: 'ephemeral' } }]
       : system.join('\n');
   }
+  if (tools && tools.length > 0) {
+    body.tools = tools.map(toAnthropicTool);
+    body.tool_choice = { type: 'auto' };
+  }
   if (normalizedProfile.temperature !== null) {
     body.temperature = normalizedProfile.temperature;
   }
@@ -97,6 +102,15 @@ export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readon
     body.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
   }
   return body;
+}
+
+function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
+  const responsesTool = tool.toResponsesTool();
+  return {
+    name: responsesTool.name,
+    description: responsesTool.description,
+    input_schema: responsesTool.parameters,
+  };
 }
 
 function toAnthropicMessage(profile: LLMProfile, message: Message): Record<string, unknown> {
@@ -181,11 +195,14 @@ function parseAnthropicMessagesResponse(raw: unknown): LLMCompletionResponse {
     .join('\n');
   const thinkingBlocks = parsed.content.filter((block): block is AnthropicThinkingBlock => block.type === 'thinking');
   const reasoningContent = thinkingBlocks.map((block) => block.thinking).join('');
+  const toolUseBlocks = parsed.content.filter((block): block is AnthropicToolUseBlock => block.type === 'tool_use');
+  const toolCalls = toolUseBlocks.map(fromAnthropicToolUse);
 
   return llmCompletionResponseSchema.parse({
     message: {
       role: 'assistant',
       content: text,
+      tool_calls: toolCalls.length > 0 ? toolCalls : null,
       reasoning_content: reasoningContent.length > 0 ? reasoningContent : null,
       thinking_blocks: thinkingBlocks.map((block) => ({
         type: 'thinking',
@@ -200,6 +217,16 @@ function parseAnthropicMessagesResponse(raw: unknown): LLMCompletionResponse {
     },
     raw,
   });
+}
+
+function fromAnthropicToolUse(block: AnthropicToolUseBlock): MessageToolCall {
+  return {
+    id: block.id,
+    responses_item_id: null,
+    name: block.name,
+    arguments: JSON.stringify(block.input),
+    origin: 'completion',
+  };
 }
 
 function resolveBaseUrl(profile: LLMProfile): string {
@@ -226,11 +253,15 @@ const anthropicTextBlockSchema = z.object({ type: z.literal('text'), text: z.str
 const anthropicThinkingBlockSchema = z
   .object({ type: z.literal('thinking'), thinking: z.string(), signature: z.string().nullable().optional() })
   .passthrough();
+const anthropicToolUseBlockSchema = z
+  .object({ type: z.literal('tool_use'), id: z.string(), name: z.string(), input: z.unknown() })
+  .passthrough();
 const anthropicOtherBlockSchema = z.object({ type: z.string() }).passthrough();
-const anthropicContentBlockSchema = z.union([anthropicTextBlockSchema, anthropicThinkingBlockSchema, anthropicOtherBlockSchema]);
+const anthropicContentBlockSchema = z.union([anthropicTextBlockSchema, anthropicThinkingBlockSchema, anthropicToolUseBlockSchema, anthropicOtherBlockSchema]);
 
 type AnthropicTextBlock = z.infer<typeof anthropicTextBlockSchema>;
 type AnthropicThinkingBlock = z.infer<typeof anthropicThinkingBlockSchema>;
+type AnthropicToolUseBlock = z.infer<typeof anthropicToolUseBlockSchema>;
 
 const anthropicMessagesResponseSchema = z
   .object({
