@@ -232,24 +232,86 @@ describe('Anthropic native tool calling', () => {
     });
   });
 
-  it('handles invalid tool arguments gracefully', () => {
+  it('groups parallel tool results into one Anthropic user turn', () => {
     const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
     const messages = [
       {
         role: 'assistant' as const,
         content: [],
-        tool_calls: [{ id: 'toolu_01A', responses_item_id: null, name: 'get_weather', arguments: 'not valid json', origin: 'completion' as const }],
+        tool_calls: [
+          { id: 'toolu_01A', responses_item_id: null, name: 'get_weather', arguments: '{"location":"NYC"}', origin: 'completion' as const },
+          { id: 'toolu_01B', responses_item_id: null, name: 'get_weather', arguments: '{"location":"Paris"}', origin: 'completion' as const },
+        ],
       },
+      { role: 'tool' as const, tool_call_id: 'toolu_01A', name: 'get_weather', content: [textContent('rain')] },
+      { role: 'tool' as const, tool_call_id: 'toolu_01B', name: 'get_weather', content: [textContent('sun')] },
     ];
 
     const body = buildAnthropicMessagesBody(profile, messages, [testTool]);
 
-    expect(body.messages[0]?.content).toContainEqual({
-      type: 'tool_use',
-      id: 'toolu_01A',
-      name: 'get_weather',
-      input: 'not valid json',
+    expect(body.messages).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'toolu_01A', name: 'get_weather', input: { location: 'NYC' } },
+          { type: 'tool_use', id: 'toolu_01B', name: 'get_weather', input: { location: 'Paris' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'toolu_01A', content: 'rain' },
+          { type: 'tool_result', tool_use_id: 'toolu_01B', content: 'sun' },
+        ],
+      },
+    ]);
+  });
+
+  it('replays every signed thinking block before tool calls', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const body = buildAnthropicMessagesBody(profile, [{
+      role: 'assistant',
+      content: [],
+      thinking_blocks: [
+        { type: 'thinking', thinking: 'first', signature: 'sig_1' },
+        { type: 'thinking', thinking: 'second', signature: 'sig_2' },
+      ],
+      tool_calls: [{ id: 'toolu_01A', responses_item_id: null, name: 'get_weather', arguments: '{"location":"SF"}', origin: 'completion' }],
+    }], [testTool]);
+
+    expect(body.messages).toEqual([{
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'first', signature: 'sig_1' },
+        { type: 'thinking', thinking: 'second', signature: 'sig_2' },
+        { type: 'tool_use', id: 'toolu_01A', name: 'get_weather', input: { location: 'SF' } },
+      ],
+    }]);
+  });
+
+  it('rejects invalid replay arguments and missing result ids', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+
+    expect(() => buildAnthropicMessagesBody(profile, [{
+      role: 'assistant',
+      content: [],
+      tool_calls: [{ id: 'toolu_01A', responses_item_id: null, name: 'get_weather', arguments: 'not valid json', origin: 'completion' }],
+    }], [testTool])).toThrow(/Anthropic tool call 'toolu_01A'.*valid JSON object/u);
+
+    expect(() => buildAnthropicMessagesBody(profile, [{
+      role: 'tool',
+      content: [textContent('result')],
+    }], [testTool])).toThrow(/tool result requires a tool_call_id/u);
+  });
+
+  it('rejects malformed known response blocks', async () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const store = new InMemorySecretStore([[llmProviderSecretRef('anthropic'), 'anthropic-key']]);
+    const client = await createAnthropicClientFromProfile(profile, store, {
+      fetch: fakeAnthropicFetch({ content: [{ type: 'tool_use', name: 'get_weather', input: { location: 'SF' } }] }),
     });
+
+    await expect(client.complete([{ role: 'user', content: [textContent('Weather?')] }], [testTool])).rejects.toThrow();
   });
 });
 
@@ -259,12 +321,7 @@ interface FakeFetchCall {
   readonly body: Record<string, unknown>;
 }
 
-type AnthropicContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'thinking'; thinking: string; signature?: string };
-
-function fakeAnthropicFetch(response: { text: string } | { content: readonly AnthropicContentBlock[] }, calls: FakeFetchCall[] = []) {
+function fakeAnthropicFetch(response: { text: string } | { content: readonly unknown[] }, calls: FakeFetchCall[] = []) {
   return async (url: string, init: { headers: Readonly<Record<string, string>>; body: string }) => {
     calls.push({
       url,

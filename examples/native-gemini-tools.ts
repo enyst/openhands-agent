@@ -45,18 +45,22 @@ if (store === null) {
   conversation.sendMessage('Look up the verification value and finish with it.');
   await conversation.run();
 
-  const actionNames = conversation.state.events
-    .filter((event) => event.kind === 'ActionEvent')
-    .map((event) => event.tool_name);
+  const actionEvents = conversation.state.events.filter((event) => event.kind === 'ActionEvent');
+  const actionNames = actionEvents.map((event) => event.tool_name);
+  const signedThoughtCount = actionEvents.flatMap((event) => event.thinking_blocks)
+    .filter((block) => block.type === 'thinking' && block.signature !== null)
+    .length;
   assert(conversation.state.executionStatus === conversationExecutionStatus.FINISHED, `conversation status was ${conversation.state.executionStatus}`);
   assert(calls.includes('lookup_value'), 'lookup_value executor was not invoked');
   assert(actionNames.includes('finish'), 'finish was not invoked as a native tool');
+  assert(signedThoughtCount > 0, 'Gemini returned no signed thought step to replay');
 
   console.log(JSON.stringify({
     example: 'native-gemini-tools',
     model: profile.model,
     execution_status: conversation.state.executionStatus,
     native_action_tools: actionNames,
+    signed_thought_blocks: signedThoughtCount,
   }));
 }
 

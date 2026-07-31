@@ -135,25 +135,38 @@ describe('Gemini Interactions native tool calling', () => {
       {
         role: 'assistant',
         content: [textContent('I will check.')],
-        reasoning_content: 'Use the weather tool.',
-        thinking_blocks: [{ type: 'thinking', thinking: 'Use the weather tool.', signature: 'thought_sig_123' }],
+        reasoning_content: 'Use the weather tool.Check both calls.',
+        thinking_blocks: [
+          { type: 'thinking', thinking: 'Use the weather tool.', signature: 'thought_sig_123' },
+          { type: 'thinking', thinking: 'Check both calls.', signature: 'thought_sig_456' },
+        ],
         tool_calls: [
           { id: 'call_1', responses_item_id: null, name: 'get_weather', arguments: '{"location":"Boston"}', origin: 'completion' },
+          { id: 'call_2', responses_item_id: null, name: 'get_weather', arguments: '{"location":"Paris"}', origin: 'completion' },
         ],
       },
       { role: 'tool', tool_call_id: 'call_1', name: 'get_weather', content: [textContent('{"weather":"rain"}')] },
+      { role: 'tool', tool_call_id: 'call_2', name: 'get_weather', content: [textContent('{"weather":"sun"}')] },
     ], [weatherTool]);
 
     expect(body.input).toEqual([
       { type: 'user_input', content: [{ type: 'text', text: 'Weather in Boston?' }] },
       { type: 'thought', signature: 'thought_sig_123', summary: [{ type: 'text', text: 'Use the weather tool.' }] },
+      { type: 'thought', signature: 'thought_sig_456', summary: [{ type: 'text', text: 'Check both calls.' }] },
       { type: 'model_output', content: [{ type: 'text', text: 'I will check.' }] },
       { type: 'function_call', id: 'call_1', name: 'get_weather', arguments: { location: 'Boston' } },
+      { type: 'function_call', id: 'call_2', name: 'get_weather', arguments: { location: 'Paris' } },
       {
         type: 'function_result',
         call_id: 'call_1',
         name: 'get_weather',
         result: [{ type: 'text', text: '{"weather":"rain"}' }],
+      },
+      {
+        type: 'function_result',
+        call_id: 'call_2',
+        name: 'get_weather',
+        result: [{ type: 'text', text: '{"weather":"sun"}' }],
       },
     ]);
   });
@@ -175,19 +188,36 @@ describe('Gemini Interactions native tool calling', () => {
     }], [weatherTool])).toThrow(/function result requires a tool_call_id/u);
   });
 
-  it('rejects malformed known response steps', async () => {
+  it.each([
+    [{ type: 'function_call', id: 'call_bad', name: 'get_weather', arguments: 'not-an-object' }],
+    [{ type: 'model_output', content: [{ type: 'text' }] }],
+    [{ type: 'thought', signature: 'sig_bad', summary: [{ type: 'text', text: 42 }] }],
+  ])('rejects malformed known response steps', async (steps) => {
     const store = new InMemorySecretStore([[llmProviderSecretRef('gemini'), 'gemini-key']]);
     const client = await createGeminiClientFromProfile(profile, store, {
-      fetch: fakeGeminiFetch({
-        id: 'interaction_bad',
-        status: 'requires_action',
-        steps: [{ type: 'function_call', id: 'call_bad', name: 'get_weather', arguments: 'not-an-object' }],
-      }),
+      fetch: fakeGeminiFetch({ id: 'interaction_bad', status: 'requires_action', steps }),
     });
 
     await expect(client.complete([{ role: 'user', content: [textContent('Weather?')] }], [weatherTool])).rejects.toThrow();
   });
 
+  it('ignores unknown future response steps without hiding known output', async () => {
+    const store = new InMemorySecretStore([[llmProviderSecretRef('gemini'), 'gemini-key']]);
+    const client = await createGeminiClientFromProfile(profile, store, {
+      fetch: fakeGeminiFetch({
+        id: 'interaction_future',
+        status: 'completed',
+        steps: [
+          { type: 'future_trace', payload: { value: 1 } },
+          { type: 'model_output', content: [{ type: 'text', text: 'done' }] },
+        ],
+      }),
+    });
+
+    const result = await client.complete([{ role: 'user', content: [textContent('Hello')] }], [weatherTool]);
+
+    expect(result.message.content).toEqual([textContent('done')]);
+  });
 });
 
 interface FakeFetchCall {

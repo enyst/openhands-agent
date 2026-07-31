@@ -322,9 +322,9 @@ Tool results in continuation:
    - **NO LIVE TEST** per user instructions (Anthropic key has no billing)
 
 6. **Edge cases from oh-tab**
-   - Tool arguments parsing: try JSON parse, fall back to raw if invalid
-   - Empty/missing descriptions: handle gracefully
-   - Tool choice: support `auto`, `any`, `none`, and specific tool selection
+   - The old client fell back to raw invalid arguments; the final client rejects them because Anthropic requires `tool_use.input` to be an object
+   - Consecutive parallel results are grouped into one user turn with multiple `tool_result` blocks
+   - The shared LLM contract currently exposes automatic choice only; provider-specific forced choice modes remain out of scope
 
 ### Phase 2: Gemini Interactions API native tools
 
@@ -354,7 +354,7 @@ Tool results in continuation:
      }
      ```
    - Add `generation_config.tool_choice: 'auto'` when tools are present
-   - Preserve `thinkingConfig.thinkingLevel` for Gemini 3.x
+   - Preserve lower-case `generation_config.thinking_level` and signed `thought` steps for Gemini 3.x
 
 4. **Response parsing**
    - Parse `steps` array for `function_call` steps
@@ -365,17 +365,17 @@ Tool results in continuation:
    - Collect `model_output` steps → message content
 
 5. **Continuation serialization**
-   - Use `previous_interaction_id` for stateful conversations
+   - Use `store: false` and replay the complete durable transcript as typed steps; do not keep mutable `previous_interaction_id` state in the client
    - Convert `tool` role messages → `function_result` input items:
      ```typescript
      {
        type: 'function_result',
-       name: message.name ?? 'unknown_tool',
-       call_id: message.tool_call_id ?? '',
+       ...(message.name === null ? {} : { name: message.name }),
+       call_id: requireToolCallId(message),
        result: [{ type: 'text', text: contentToString(message.content).join('\n') }],
      }
      ```
-   - Re-send tools in continuation request
+   - Re-send tools in continuation requests
 
 6. **Tests**
    - Unit test: Interactions API request format with tools

@@ -78,7 +78,10 @@ export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readon
   const body: Record<string, unknown> = {
     model: normalizedProfile.model,
     max_tokens: maxTokens,
-    messages: parsedMessages.filter((message) => message.role !== 'system').map((message) => toAnthropicMessage(normalizedProfile, message)),
+    messages: toAnthropicMessages(
+      normalizedProfile,
+      parsedMessages.filter((message) => message.role !== 'system'),
+    ),
   };
   if (system.length > 0) {
     body.system = shouldCacheSystem
@@ -113,6 +116,25 @@ function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
   };
 }
 
+function toAnthropicMessages(profile: LLMProfile, messages: readonly Message[]): readonly Record<string, unknown>[] {
+  const result: Record<string, unknown>[] = [];
+  for (const message of messages) {
+    if (message.role !== 'tool') {
+      result.push(toAnthropicMessage(profile, message));
+      continue;
+    }
+
+    const toolResult = toAnthropicToolResultBlock(message);
+    const previous = result.at(-1);
+    if (previous?.role === 'user' && Array.isArray(previous.content)) {
+      previous.content.push(toolResult);
+    } else {
+      result.push({ role: 'user', content: [toolResult] });
+    }
+  }
+  return result;
+}
+
 function toAnthropicMessage(profile: LLMProfile, message: Message): Record<string, unknown> {
   if (message.role === 'assistant') {
     return { role: 'assistant', content: toAnthropicAssistantContent(message) };
@@ -127,13 +149,12 @@ function toAnthropicMessage(profile: LLMProfile, message: Message): Record<strin
 }
 
 function toAnthropicAssistantContent(message: Message): readonly Record<string, unknown>[] {
-  const blocks: Record<string, unknown>[] = [];
-  const thinkingBlock = message.thinking_blocks.find(
-    (block): block is Extract<Message['thinking_blocks'][number], { type: 'thinking' }> => block.type === 'thinking' && block.signature !== null,
-  );
-  if (thinkingBlock !== undefined) {
-    blocks.push({ type: 'thinking', thinking: thinkingBlock.thinking, signature: thinkingBlock.signature });
-  }
+  const blocks: Record<string, unknown>[] = message.thinking_blocks
+    .filter(
+      (block): block is Extract<Message['thinking_blocks'][number], { type: 'thinking' }> & { signature: string } =>
+        block.type === 'thinking' && block.signature !== null,
+    )
+    .map((block) => ({ type: 'thinking', thinking: block.thinking, signature: block.signature }));
 
   const text = reduceTextContent(message);
   if (text.length > 0) {
@@ -150,17 +171,19 @@ function toAnthropicToolUseBlock(toolCall: MessageToolCall): Record<string, unkn
     type: 'tool_use',
     id: toolCall.id,
     name: toolCall.name,
-    input: parseToolArguments(toolCall.arguments),
+    input: parseToolArguments(toolCall),
   };
 }
 
 function toAnthropicToolResultBlock(message: Message): Record<string, unknown> {
-  const block: Record<string, unknown> = {
+  if (message.tool_call_id === null) {
+    throw new Error('Anthropic tool result requires a tool_call_id.');
+  }
+  return {
     type: 'tool_result',
-    tool_use_id: message.tool_call_id ?? '',
+    tool_use_id: message.tool_call_id,
     content: reduceTextContent(message),
   };
-  return block;
 }
 
 function toAnthropicContentBlock(profile: LLMProfile, content: Content): Record<string, unknown> {
@@ -179,12 +202,17 @@ function toAnthropicContentBlock(profile: LLMProfile, content: Content): Record<
   return block;
 }
 
-function parseToolArguments(args: string): unknown {
+function parseToolArguments(toolCall: MessageToolCall): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    return JSON.parse(args) as unknown;
+    parsed = JSON.parse(toolCall.arguments) as unknown;
   } catch {
-    return args;
+    throw new Error(`Anthropic tool call '${toolCall.id}' arguments must be a valid JSON object.`);
   }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Anthropic tool call '${toolCall.id}' arguments must be a valid JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function parseAnthropicMessagesResponse(raw: unknown): LLMCompletionResponse {
@@ -254,10 +282,23 @@ const anthropicThinkingBlockSchema = z
   .object({ type: z.literal('thinking'), thinking: z.string(), signature: z.string().nullable().optional() })
   .passthrough();
 const anthropicToolUseBlockSchema = z
-  .object({ type: z.literal('tool_use'), id: z.string(), name: z.string(), input: z.unknown() })
+  .object({
+    type: z.literal('tool_use'),
+    id: z.string(),
+    name: z.string(),
+    input: z.record(z.string(), z.unknown()),
+  })
   .passthrough();
-const anthropicOtherBlockSchema = z.object({ type: z.string() }).passthrough();
-const anthropicContentBlockSchema = z.union([anthropicTextBlockSchema, anthropicThinkingBlockSchema, anthropicToolUseBlockSchema, anthropicOtherBlockSchema]);
+const knownAnthropicBlockTypes = new Set(['text', 'thinking', 'tool_use']);
+const anthropicOtherBlockSchema = z
+  .object({ type: z.string().refine((type) => !knownAnthropicBlockTypes.has(type)) })
+  .passthrough();
+const anthropicContentBlockSchema = z.union([
+  anthropicTextBlockSchema,
+  anthropicThinkingBlockSchema,
+  anthropicToolUseBlockSchema,
+  anthropicOtherBlockSchema,
+]);
 
 type AnthropicTextBlock = z.infer<typeof anthropicTextBlockSchema>;
 type AnthropicThinkingBlock = z.infer<typeof anthropicThinkingBlockSchema>;
