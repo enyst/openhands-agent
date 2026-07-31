@@ -204,6 +204,91 @@ describe('OpenAI native tool serialization', () => {
   });
 });
 
+describe('OpenAI-compatible native tool routes', () => {
+  const tool = new ToolDefinition({
+    name: 'lookup_value',
+    description: 'Look up a value by key.',
+    inputSchema: z.object({ key: z.string() }).strict(),
+  });
+
+  it.each([
+    {
+      name: 'OpenRouter',
+      profile: { profileId: 'openrouter-tools', providerId: 'openrouter', model: 'openai/gpt-4.1' },
+      expectedUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    },
+    {
+      name: 'LiteLLM-compatible custom proxy',
+      profile: {
+        profileId: 'litellm-tools',
+        providerId: 'litellm_proxy',
+        model: 'openai/gpt-4.1',
+        baseUrl: 'https://llm-proxy.example.test/v1/',
+      },
+      expectedUrl: 'https://llm-proxy.example.test/v1/chat/completions',
+    },
+  ])('sends Chat Completions tools through $name', async ({ profile: rawProfile, expectedUrl }) => {
+    const profile = llmProfileSchema.parse(rawProfile);
+    const calls: FakeFetchCall[] = [];
+    const store = new InMemorySecretStore([[llmProviderSecretRef(profile.providerId), 'proxy-key']]);
+    const client = await createOpenAIChatClientFromProfile(profile, store, { fetch: fakeFetch({ content: 'ok' }, calls) });
+
+    await client.complete([{ role: 'user', content: [textContent('Look it up.')] }], [tool]);
+
+    expect(calls[0]?.url).toBe(expectedUrl);
+    expect(calls[0]?.headers.authorization).toBe('Bearer proxy-key');
+    expect(calls[0]?.body.tools).toEqual([{
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.toResponsesTool().parameters,
+        strict: false,
+      },
+    }]);
+  });
+
+  it('round-trips proxy tool calls and results using Chat Completions messages', async () => {
+    const profile = llmProfileSchema.parse({
+      profileId: 'custom-proxy-tools',
+      providerId: 'custom_gateway',
+      model: 'gpt-4.1',
+      baseUrl: 'https://gateway.example.test/openai/v1',
+    });
+    const calls: FakeFetchCall[] = [];
+    const client = new OpenAIChatClient(profile, 'proxy-key', fakeToolCallFetch(calls));
+    const userMessage = { role: 'user' as const, content: [textContent('Look it up.')] };
+
+    const result = await client.complete([userMessage], [tool]);
+    await client.complete([
+      userMessage,
+      result.message,
+      { role: 'tool', tool_call_id: 'call_proxy_1', name: 'lookup_value', content: [textContent('{"value":"ok"}')] },
+    ], [tool]);
+
+    expect(result.message.tool_calls).toEqual([{
+      id: 'call_proxy_1',
+      responses_item_id: null,
+      name: 'lookup_value',
+      arguments: '{"key":"verification"}',
+      origin: 'completion',
+    }]);
+    expect(calls[1]?.body.messages).toEqual([
+      { role: 'user', content: 'Look it up.' },
+      {
+        role: 'assistant',
+        tool_calls: [{
+          id: 'call_proxy_1',
+          type: 'function',
+          function: { name: 'lookup_value', arguments: '{"key":"verification"}' },
+        }],
+      },
+      { role: 'tool', content: '{"value":"ok"}', tool_call_id: 'call_proxy_1', name: 'lookup_value' },
+    ]);
+  });
+});
+
+
 describe('OpenAI chat message serialization parity', () => {
   it('drops empty assistant content when tool calls are present', () => {
     const profile = llmProfileSchema.parse({ profileId: 'default', providerId: 'openai', model: 'gpt-5.1' });
@@ -438,6 +523,42 @@ function fakeFetch(response: { content: string }, calls: FakeFetchCall[] = []) {
     };
   };
 }
+
+function fakeToolCallFetch(calls: FakeFetchCall[]) {
+  return async (url: string, init: { headers?: HeadersInit; body?: BodyInit | null }) => {
+    calls.push({
+      url,
+      headers: normalizeHeaders(init.headers),
+      body: JSON.parse(String(init.body)) as Record<string, unknown>,
+    });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          choices: [{
+            index: 0,
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [{
+                id: 'call_proxy_1',
+                type: 'function',
+                function: { name: 'lookup_value', arguments: '{"key":"verification"}' },
+              }],
+            },
+          }],
+          usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+        };
+      },
+      async text() {
+        return JSON.stringify(await this.json());
+      },
+    };
+  };
+}
+
 
 function fakeResponsesFetch(response: { content: string }, calls: FakeFetchCall[] = []) {
   return async (url: string, init: { headers?: HeadersInit; body?: BodyInit | null }) => {
