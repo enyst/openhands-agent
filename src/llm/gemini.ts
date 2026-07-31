@@ -151,9 +151,12 @@ function toGeminiInteractionSteps(message: Message): readonly Record<string, unk
     return [{ type: 'user_input', content: toGeminiContent(message.content) }];
   }
   if (message.role === 'tool') {
+    if (message.tool_call_id === null) {
+      throw new Error('Gemini function result requires a tool_call_id.');
+    }
     const step: Record<string, unknown> = {
       type: 'function_result',
-      call_id: message.tool_call_id ?? '',
+      call_id: message.tool_call_id,
       result: toGeminiContent(message.content),
     };
     if (message.name !== null) {
@@ -314,7 +317,10 @@ const geminiFunctionCallStepSchema = z
     arguments: z.record(z.string(), z.unknown()),
   })
   .passthrough();
-const geminiOtherStepSchema = z.object({ type: z.string() }).passthrough();
+const knownGeminiStepTypes = new Set(['model_output', 'thought', 'function_call']);
+const geminiOtherStepSchema = z
+  .object({ type: z.string().refine((type) => !knownGeminiStepTypes.has(type)) })
+  .passthrough();
 const geminiStepSchema = z.union([
   geminiModelOutputStepSchema,
   geminiThoughtStepSchema,

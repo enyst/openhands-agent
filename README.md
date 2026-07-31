@@ -4,7 +4,7 @@ Idiomatic TypeScript transpilation of the [OpenHands](https://github.com/OpenHan
 
 ## Status
 
-`0.3.3` is the native OpenAI tool-completion parity release of the fresh TypeScript transpilation. It covers the core SDK surfaces needed to build and run agent loops locally, passes usable Agent tools through OpenAI Chat Completions and Responses, and documents the main architecture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
+`0.3.3` established native OpenAI tool-completion parity. The current development line extends the same `ToolDefinition` flow through Anthropic Messages, Gemini Interactions, OpenRouter, LiteLLM-compatible endpoints, and custom OpenAI-compatible gateways. The main architecture is documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
 
 - zod-backed event, tool, settings, profile, and serialization models
 - profile-first LLM clients for OpenAI chat completions, OpenAI Responses, Anthropic, Gemini, and OpenAI-compatible profiles
@@ -18,7 +18,7 @@ Intentional deviations from Python remain: no ACP runtime, security analyzers, r
 
 This package is tracking the Python `agent-sdk` architecture while staying idiomatic TypeScript. The implemented surfaces currently include focused parity coverage for:
 
-- LLM message/content serialization, Agent-to-LLM `ToolDefinition` propagation, and provider-owned OpenAI chat completions/Responses, Anthropic, and Gemini request/response mapping
+- LLM message/content serialization, Agent-to-LLM `ToolDefinition` propagation, and provider-owned OpenAI chat completions/Responses, Anthropic Messages, and Gemini Interactions request/response mapping
 - event schemas and `eventsToMessages` conversion, including parallel tool-call batching behavior
 - conversation state, local/remote conversations, pause/resume, restore, parallel execution, and stuck detection
 - settings/profiles, profile-selected LLM field hygiene, provider/profile-scoped API key references, and keyring-backed secret storage
@@ -119,12 +119,14 @@ console.log(state.executionStatus);
 
 ## Examples
 
-Runnable TypeScript examples live in [`examples/`](examples/) and are checked by `npm run test:examples`. Real-LLM examples use [`examples/_shared/exampleProfile.ts`](examples/_shared/exampleProfile.ts): by default set `OPENAI_API_KEY` to run them against an OpenAI LLM profile, or set `LLM_PROVIDER_ID`/`LLM_PROVIDER` and the matching `<PROVIDER>_API_KEY` env var to exercise another provider. The helper stores keys under `llmProviderSecretRef(profile.providerId)`, optionally overrides the model with `OPENAI_MODEL` or `LLM_MODEL`, and skips gracefully when no provider key is present.
+Runnable TypeScript examples live in [`examples/`](examples/) and are checked by `npm run test:examples`. Real-LLM examples use [`examples/_shared/exampleProfile.ts`](examples/_shared/exampleProfile.ts): by default set `OPENAI_API_KEY` to run them against an OpenAI LLM profile, or set `LLM_PROVIDER_ID`/`LLM_PROVIDER` and the matching `<PROVIDER>_API_KEY` env var to exercise another provider. The helper stores keys under `llmProviderSecretRef(profile.providerId)`, optionally overrides the model with `OPENAI_MODEL` or `LLM_MODEL`, and skips gracefully when no provider key is present. `npm run live:gemini-tools` is the opt-in Gemini native-tool smoke; Anthropic tool coverage is recorded-shape/unit-only and makes no live request by default.
 
 | Example | Covers |
 |---------|--------|
 | [`hello-world.ts`](examples/hello-world.ts) | Real OpenAI profile completion through the shared env-backed example profile helper |
 | [`native-openai-tools.ts`](examples/native-openai-tools.ts) | Real OpenAI Responses read/edit/finish function calls through Agent tool dispatch |
+| [`native-gemini-tools.ts`](examples/native-gemini-tools.ts) | Credential-gated Gemini Interactions tool dispatch; defaults to `gemini-3.5-flash-lite` |
+| [`native-tool-serialization.ts`](examples/native-tool-serialization.ts) | Keyless comparison of one `ToolDefinition` across all four provider wire formats |
 | [`tools.ts`](examples/tools.ts) | Concrete terminal, file editor, glob, grep, and task tracker tools |
 | [`profiles-and-secrets.ts`](examples/profiles-and-secrets.ts) | Provider/profile-scoped LLM API key references and secret store usage |
 | [`agent-settings.ts`](examples/agent-settings.ts) | Agent settings/profile validation and profile-selected raw LLM field cleanup |

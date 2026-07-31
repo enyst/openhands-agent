@@ -167,6 +167,27 @@ describe('Gemini Interactions native tool calling', () => {
       ],
     }], [weatherTool])).toThrow(/Gemini function call 'call_bad'.*valid JSON object/u);
   });
+
+  it('rejects function results without a call id', () => {
+    expect(() => buildGeminiInteractionsBody(profile, [{
+      role: 'tool',
+      content: [textContent('result')],
+    }], [weatherTool])).toThrow(/function result requires a tool_call_id/u);
+  });
+
+  it('rejects malformed known response steps', async () => {
+    const store = new InMemorySecretStore([[llmProviderSecretRef('gemini'), 'gemini-key']]);
+    const client = await createGeminiClientFromProfile(profile, store, {
+      fetch: fakeGeminiFetch({
+        id: 'interaction_bad',
+        status: 'requires_action',
+        steps: [{ type: 'function_call', id: 'call_bad', name: 'get_weather', arguments: 'not-an-object' }],
+      }),
+    });
+
+    await expect(client.complete([{ role: 'user', content: [textContent('Weather?')] }], [weatherTool])).rejects.toThrow();
+  });
+
 });
 
 interface FakeFetchCall {

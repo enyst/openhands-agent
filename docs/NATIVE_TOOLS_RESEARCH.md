@@ -6,6 +6,13 @@ Research for beads: `openhands-agent-tools-research`, `openhands-agent-tools-nat
 
 This document captures provider-native tool API shapes for Anthropic Messages, Gemini Interactions API, and OpenAI-compatible clients, along with proven data-shape choices from the old oh-tab implementation. The goal is to wire `ToolDefinition[]` through each provider's `complete()` method.
 
+## Implementation outcome
+
+The provider work is implemented in the current four-client architecture. Anthropic Messages uses native `tool_use`/`tool_result` blocks; Gemini uses `/v1beta/interactions` with typed steps and `store: false`; OpenRouter, LiteLLM-compatible endpoints, and custom gateways reuse the standard Chat Completions function dialect. Gemini intentionally uses stateless replay because the durable SDK event/message transcript—not mutable client-held `previous_interaction_id` state—must remain sufficient for conversation restore and forks.
+
+Provider unit tests cover request declarations, empty-tool omission, response calls, parallel calls, signed thinking, and result continuation. `examples/native-tool-serialization.ts` is keyless; OpenAI and Gemini live agent examples are credential-gated. Anthropic was not called live because the available key has no credit.
+
+
 ## Provider API Shapes
 
 ### Anthropic Messages API

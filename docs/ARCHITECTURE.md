@@ -111,7 +111,7 @@ Provider clients live next to the neutral model:
 - `OpenAIChatClient` for chat completions and compatible proxies.
 - `OpenAIResponsesClient` for the Responses API.
 - `AnthropicMessagesClient` for Anthropic Messages.
-- `GeminiClient` for Gemini.
+- `GeminiClient` for the Gemini Interactions API.
 
 The product boundary is profile-first: `createClientFromProfile(profile, secretStore)` resolves a concrete client from an `LLMProfile`. Product and REST callers select profiles; they do not instantiate a raw Python-style `LLM`, pass loose model/provider fields, or rely on implicit default models. Low-level provider clients and provider-specific factories remain exported only as explicit advanced SDK/test building blocks.
 
@@ -127,10 +127,12 @@ The four provider APIs are implemented as the APIs they actually are, not hidden
 
 - OpenAI-compatible Chat Completions owns chat-completions request/response shape and compatible proxy behavior.
 - OpenAI Responses owns Responses-specific input, tool, reasoning, and replay fields.
-- Anthropic Messages owns Anthropic content blocks, prompt caching, and extended-thinking details.
-- Gemini owns GenerateContent parts, function-call parts, `thoughtSignature` round-tripping, and Gemini thinking config.
+- Anthropic Messages owns Anthropic content blocks, prompt caching, extended-thinking details, `tool_use` calls, and `tool_result` continuation.
+- Gemini owns Interactions steps, flat function tools, signed thought replay, `function_call` parsing, and `function_result` continuation.
 
-For OpenAI, Chat Completions wraps the schema produced from `ToolDefinition.toResponsesTool()` in its nested function-tool shape, while Responses uses the helper's native top-level shape. Both omit the wire-level `tools` field when the supplied list is empty. These are provider-client concerns; the shared completion interface carries `ToolDefinition`s without a parallel DTO layer.
+Every client receives the same optional `ToolDefinition[]` through `LLMClient.complete()` and derives its provider declaration from `ToolDefinition.toResponsesTool()`. Chat Completions wraps that schema in its nested function shape; Responses uses the top-level shape; Anthropic renames `parameters` to `input_schema`; Gemini uses a flat function declaration and removes JSON Schema fields its API rejects. All clients omit the wire-level `tools` field when the supplied list is empty.
+
+Gemini requests use documented stateless Interactions mode (`store: false`) and reconstruct `user_input`, `thought`, `model_output`, `function_call`, and `function_result` steps from the durable neutral transcript. This keeps conversation restore and forks correct instead of coupling an SDK client instance to server-side `previous_interaction_id` state. Signed thought steps round-trip through `Message.thinking_blocks`.
 
 `oh-tab/packages/agent-sdk` was used as inspiration for product-level profile semantics, key lookup shape, and build/test tooling expectations. It was not copied: the implementation is fresh TypeScript, and the older package remains reference-only.
 
