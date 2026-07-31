@@ -37,7 +37,8 @@ describe('createClientFromProfile', () => {
     const response = await client.complete([{ role: 'user', content: [textContent('ping')] }]);
 
     expect(client).toBeInstanceOf(GeminiClient);
-    expect(calls[0]?.url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent');
+    expect(calls[0]?.url).toBe('https://generativelanguage.googleapis.com/v1beta/interactions');
+    expect(calls[0]?.body).toMatchObject({ model: 'gemini-3.5-flash', store: false });
     expect(calls[0]?.headers['x-goog-api-key']).toBe('gemini-key');
     expect(response.message.content).toEqual([textContent('gemini pong')]);
   });
@@ -118,8 +119,10 @@ function fakeFetch(kind: 'anthropic' | 'gemini' | 'responses' | 'chat', calls: F
         }
         if (kind === 'gemini') {
           return {
-            candidates: [{ content: { role: 'model', parts: [{ text: 'gemini pong' }] } }],
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+            id: 'interaction_1',
+            status: 'completed',
+            steps: [{ type: 'model_output', content: [{ type: 'text', text: 'gemini pong' }] }],
+            usage: { total_input_tokens: 1, total_output_tokens: 1, total_tokens: 2 },
           };
         }
         if (kind === 'responses') {
