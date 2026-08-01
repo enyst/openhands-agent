@@ -149,12 +149,14 @@ function toAnthropicMessage(profile: LLMProfile, message: Message): Record<strin
 }
 
 function toAnthropicAssistantContent(message: Message): readonly Record<string, unknown>[] {
-  const blocks: Record<string, unknown>[] = message.thinking_blocks
-    .filter(
-      (block): block is Extract<Message['thinking_blocks'][number], { type: 'thinking' }> & { signature: string } =>
-        block.type === 'thinking' && block.signature !== null,
-    )
-    .map((block) => ({ type: 'thinking', thinking: block.thinking, signature: block.signature }));
+  const blocks: Record<string, unknown>[] = [];
+  for (const block of message.thinking_blocks) {
+    if (block.type === 'redacted_thinking') {
+      blocks.push({ type: 'redacted_thinking', data: block.data });
+    } else if (block.signature !== null) {
+      blocks.push({ type: 'thinking', thinking: block.thinking, signature: block.signature });
+    }
+  }
 
   const text = reduceTextContent(message);
   if (text.length > 0) {
@@ -221,8 +223,14 @@ function parseAnthropicMessagesResponse(raw: unknown): LLMCompletionResponse {
     .filter((block): block is AnthropicTextBlock => block.type === 'text')
     .map((block) => block.text)
     .join('\n');
-  const thinkingBlocks = parsed.content.filter((block): block is AnthropicThinkingBlock => block.type === 'thinking');
-  const reasoningContent = thinkingBlocks.map((block) => block.thinking).join('');
+  const thinkingBlocks = parsed.content.filter(
+    (block): block is AnthropicThinkingBlock | AnthropicRedactedThinkingBlock =>
+      block.type === 'thinking' || block.type === 'redacted_thinking',
+  );
+  const reasoningContent = thinkingBlocks
+    .filter((block): block is AnthropicThinkingBlock => block.type === 'thinking')
+    .map((block) => block.thinking)
+    .join('');
   const toolUseBlocks = parsed.content.filter((block): block is AnthropicToolUseBlock => block.type === 'tool_use');
   const toolCalls = toolUseBlocks.map(fromAnthropicToolUse);
 
@@ -232,11 +240,9 @@ function parseAnthropicMessagesResponse(raw: unknown): LLMCompletionResponse {
       content: text,
       tool_calls: toolCalls.length > 0 ? toolCalls : null,
       reasoning_content: reasoningContent.length > 0 ? reasoningContent : null,
-      thinking_blocks: thinkingBlocks.map((block) => ({
-        type: 'thinking',
-        thinking: block.thinking,
-        signature: block.signature ?? null,
-      })),
+      thinking_blocks: thinkingBlocks.map((block) => block.type === 'thinking'
+        ? { type: 'thinking', thinking: block.thinking, signature: block.signature ?? null }
+        : { type: 'redacted_thinking', data: block.data }),
     },
     usage: parsed.usage === null ? null : {
       promptTokens: parsed.usage.input_tokens,
@@ -281,6 +287,9 @@ const anthropicTextBlockSchema = z.object({ type: z.literal('text'), text: z.str
 const anthropicThinkingBlockSchema = z
   .object({ type: z.literal('thinking'), thinking: z.string(), signature: z.string().nullable().optional() })
   .passthrough();
+const anthropicRedactedThinkingBlockSchema = z
+  .object({ type: z.literal('redacted_thinking'), data: z.string() })
+  .passthrough();
 const anthropicToolUseBlockSchema = z
   .object({
     type: z.literal('tool_use'),
@@ -289,19 +298,21 @@ const anthropicToolUseBlockSchema = z
     input: z.record(z.string(), z.unknown()),
   })
   .passthrough();
-const knownAnthropicBlockTypes = new Set(['text', 'thinking', 'tool_use']);
+const knownAnthropicBlockTypes = new Set(['text', 'thinking', 'redacted_thinking', 'tool_use']);
 const anthropicOtherBlockSchema = z
   .object({ type: z.string().refine((type) => !knownAnthropicBlockTypes.has(type)) })
   .passthrough();
 const anthropicContentBlockSchema = z.union([
   anthropicTextBlockSchema,
   anthropicThinkingBlockSchema,
+  anthropicRedactedThinkingBlockSchema,
   anthropicToolUseBlockSchema,
   anthropicOtherBlockSchema,
 ]);
 
 type AnthropicTextBlock = z.infer<typeof anthropicTextBlockSchema>;
 type AnthropicThinkingBlock = z.infer<typeof anthropicThinkingBlockSchema>;
+type AnthropicRedactedThinkingBlock = z.infer<typeof anthropicRedactedThinkingBlockSchema>;
 type AnthropicToolUseBlock = z.infer<typeof anthropicToolUseBlockSchema>;
 
 const anthropicMessagesResponseSchema = z

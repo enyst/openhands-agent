@@ -175,6 +175,27 @@ describe('Anthropic native tool calling', () => {
     ]);
   });
 
+  it('preserves redacted thinking blocks from responses', async () => {
+    const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
+    const store = new InMemorySecretStore([[llmProviderSecretRef('anthropic'), 'anthropic-key']]);
+    const client = await createAnthropicClientFromProfile(profile, store, {
+      fetch: fakeAnthropicFetch({
+        content: [
+          { type: 'thinking', thinking: 'first', signature: 'sig_1' },
+          { type: 'redacted_thinking', data: 'encrypted_1' },
+          { type: 'text', text: 'done' },
+        ],
+      }),
+    });
+
+    const result = await client.complete([{ role: 'user', content: [textContent('Think')] }]);
+
+    expect(result.message.thinking_blocks).toEqual([
+      { type: 'thinking', thinking: 'first', signature: 'sig_1' },
+      { type: 'redacted_thinking', data: 'encrypted_1' },
+    ]);
+  });
+
   it('handles multiple parallel tool calls', async () => {
     const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
     const store = new InMemorySecretStore([[llmProviderSecretRef('anthropic'), 'anthropic-key']]);
@@ -267,13 +288,14 @@ describe('Anthropic native tool calling', () => {
     ]);
   });
 
-  it('replays every signed thinking block before tool calls', () => {
+  it('replays every signed and redacted thinking block before tool calls', () => {
     const profile = llmProfileSchema.parse({ profileId: 'sonnet', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
     const body = buildAnthropicMessagesBody(profile, [{
       role: 'assistant',
       content: [],
       thinking_blocks: [
         { type: 'thinking', thinking: 'first', signature: 'sig_1' },
+        { type: 'redacted_thinking', data: 'encrypted_1' },
         { type: 'thinking', thinking: 'second', signature: 'sig_2' },
       ],
       tool_calls: [{ id: 'toolu_01A', responses_item_id: null, name: 'get_weather', arguments: '{"location":"SF"}', origin: 'completion' }],
@@ -283,6 +305,7 @@ describe('Anthropic native tool calling', () => {
       role: 'assistant',
       content: [
         { type: 'thinking', thinking: 'first', signature: 'sig_1' },
+        { type: 'redacted_thinking', data: 'encrypted_1' },
         { type: 'thinking', thinking: 'second', signature: 'sig_2' },
         { type: 'tool_use', id: 'toolu_01A', name: 'get_weather', input: { location: 'SF' } },
       ],

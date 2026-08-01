@@ -297,7 +297,9 @@ function isJsonObject(value: unknown): value is JsonObject {
 }
 
 const geminiTextContentSchema = z.object({ type: z.literal('text'), text: z.string() }).passthrough();
-const geminiOtherContentSchema = z.object({ type: z.string() }).passthrough();
+const geminiOtherContentSchema = z
+  .object({ type: z.string().refine((type) => type !== 'text') })
+  .passthrough();
 const geminiContentSchema = z.union([geminiTextContentSchema, geminiOtherContentSchema]);
 const geminiModelOutputStepSchema = z
   .object({ type: z.literal('model_output'), content: z.array(geminiContentSchema).default([]) })

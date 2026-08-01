@@ -189,13 +189,13 @@ describe('Gemini Interactions native tool calling', () => {
   });
 
   it.each([
-    [{ type: 'function_call', id: 'call_bad', name: 'get_weather', arguments: 'not-an-object' }],
-    [{ type: 'model_output', content: [{ type: 'text' }] }],
-    [{ type: 'thought', signature: 'sig_bad', summary: [{ type: 'text', text: 42 }] }],
-  ])('rejects malformed known response steps', async (steps) => {
+    { type: 'function_call', id: 'call_bad', name: 'get_weather', arguments: 'not-an-object' },
+    { type: 'model_output', content: [{ type: 'text' }] },
+    { type: 'thought', signature: 'sig_bad', summary: [{ type: 'text', text: 42 }] },
+  ])('rejects malformed known response steps', async (step) => {
     const store = new InMemorySecretStore([[llmProviderSecretRef('gemini'), 'gemini-key']]);
     const client = await createGeminiClientFromProfile(profile, store, {
-      fetch: fakeGeminiFetch({ id: 'interaction_bad', status: 'requires_action', steps }),
+      fetch: fakeGeminiFetch({ id: 'interaction_bad', status: 'requires_action', steps: [step] }),
     });
 
     await expect(client.complete([{ role: 'user', content: [textContent('Weather?')] }], [weatherTool])).rejects.toThrow();
