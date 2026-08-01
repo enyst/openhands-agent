@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 import { getLlmApiKey } from '../secrets/index.js';
 import type { SecretStore } from '../secrets/index.js';
+import type { JsonObject, ToolDefinition } from '../tool/index.js';
 import { llmCompletionResponseSchema, type FetchLike, type LLMClient, type LLMCompletionResponse } from './client.js';
 import { contentToString, messageSchema, type Content, type LLMProfile, type Message, type MessageToolCall } from './index.js';
-import { normalizeGenerationParamsForModel, toGeminiThinkingLevel } from './provider-quirks.js';
 
 export { llmProfileSchema } from './index.js';
 export type { LLMProfile } from './index.js';
@@ -26,19 +26,19 @@ export class GeminiClient implements LLMClient {
     this.fetchImpl = fetchImpl;
   }
 
-  async complete(messages: readonly Message[]): Promise<LLMCompletionResponse> {
-    const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/models/${encodeURIComponent(this.profile.model)}:generateContent`, {
+  async complete(messages: readonly Message[], tools?: readonly ToolDefinition[]): Promise<LLMCompletionResponse> {
+    const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/interactions`, {
       method: 'POST',
       headers: buildHeaders(this.profile, this.apiKey),
-      body: JSON.stringify(buildGeminiGenerateContentBody(this.profile, messages)),
+      body: JSON.stringify(buildGeminiInteractionsBody(this.profile, messages, tools)),
     });
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Gemini generateContent failed with HTTP ${response.status}: ${text}`);
+      throw new Error(`Gemini Interactions completion failed with HTTP ${response.status}: ${text}`);
     }
 
-    return parseGeminiGenerateContentResponse(await response.json());
+    return parseGeminiInteractionResponse(await response.json());
   }
 }
 
@@ -63,109 +63,188 @@ export async function createGeminiClientFromProfile(
   return new GeminiClient(profile, apiKey, options.fetch ?? defaultFetch);
 }
 
-export function buildGeminiGenerateContentBody(profile: LLMProfile, messages: readonly Message[]): Record<string, unknown> {
-  const normalizedProfile = normalizeGenerationParamsForModel(profile);
+export function buildGeminiInteractionsBody(
+  profile: LLMProfile,
+  messages: readonly Message[],
+  tools: readonly ToolDefinition[] = [],
+): Record<string, unknown> {
+  assertSupportedGenerationParams(profile);
   const parsedMessages = messages.map((message) => messageSchema.parse(message));
-  const system = parsedMessages.filter((message) => message.role === 'system').flatMap((message) => contentToString(message.content));
+  const systemInstruction = parsedMessages
+    .filter((message) => message.role === 'system')
+    .flatMap((message) => contentToString(message.content))
+    .join('\n');
   const body: Record<string, unknown> = {
-    contents: parsedMessages.filter((message) => message.role !== 'system').map(toGeminiContent),
+    model: profile.model,
+    store: false,
+    input: parsedMessages
+      .filter((message) => message.role !== 'system')
+      .flatMap(toGeminiInteractionSteps),
   };
-  if (system.length > 0) {
-    body.systemInstruction = { parts: system.map((text) => ({ text })) };
+  if (systemInstruction.length > 0) {
+    body.system_instruction = systemInstruction;
   }
-  const generationConfig = buildGenerationConfig(normalizedProfile);
+  if (tools.length > 0) {
+    body.tools = tools.map(toGeminiInteractionTool);
+  }
+  const generationConfig = buildGenerationConfig(profile, tools.length > 0);
   if (Object.keys(generationConfig).length > 0) {
-    body.generationConfig = generationConfig;
+    body.generation_config = generationConfig;
   }
   return body;
 }
 
-function toGeminiContent(message: Message): Record<string, unknown> {
-  if (message.role === 'tool') {
-    return {
-      role: 'user',
-      parts: [{ functionResponse: { name: message.name ?? 'unknown_tool', response: { content: contentToString(message.content).join('\n') } } }],
-    };
+function assertSupportedGenerationParams(profile: LLMProfile): void {
+  const unsupported = [
+    ['temperature', profile.temperature],
+    ['topP', profile.topP],
+    ['topK', profile.topK],
+  ].filter((entry): entry is [string, number] => entry[1] !== null);
+  if (unsupported.length > 0) {
+    throw new Error(
+      `Gemini Interactions does not support profile fields: ${unsupported.map(([name]) => name).join(', ')}.`,
+    );
   }
-  return {
-    role: message.role === 'assistant' ? 'model' : 'user',
-    parts: toGeminiParts(message),
-  };
 }
 
-function toGeminiParts(message: Message): readonly Record<string, unknown>[] {
-  const signature = firstThinkingSignature(message);
-  const parts = message.content.flatMap((content) => {
-    if (content.type === 'text' && content.text.length === 0) {
-      return [];
-    }
-    return [toGeminiPart(content, signature)];
-  });
-  if (message.tool_calls !== null) {
-    parts.push(...message.tool_calls.map((toolCall, index) => toGeminiFunctionCallPart(toolCall, index === 0 ? signature : null)));
-  }
-  return parts;
-}
-
-function toGeminiPart(content: Content, thoughtSignature: string | null): Record<string, unknown> {
-  if (content.type === 'text') {
-    const part: Record<string, unknown> = { text: content.text };
-    if (thoughtSignature !== null) {
-      part.thoughtSignature = thoughtSignature;
-    }
-    return part;
-  }
-  return { fileData: { fileUri: content.image_urls[0] ?? '' } };
-}
-
-function toGeminiFunctionCallPart(toolCall: MessageToolCall, thoughtSignature: string | null): Record<string, unknown> {
-  const part: Record<string, unknown> = { functionCall: { name: toolCall.name, args: parseToolArguments(toolCall.arguments) } };
-  if (thoughtSignature !== null) {
-    part.thoughtSignature = thoughtSignature;
-  }
-  return part;
-}
-
-function buildGenerationConfig(profile: LLMProfile): Record<string, unknown> {
+function buildGenerationConfig(profile: LLMProfile, hasTools: boolean): Record<string, unknown> {
   const config: Record<string, unknown> = {};
-  if (profile.temperature !== null) {
-    config.temperature = profile.temperature;
-  }
-  if (profile.topP !== null) {
-    config.topP = profile.topP;
-  }
-  if (profile.topK !== null) {
-    config.topK = profile.topK;
-  }
   if (profile.maxOutputTokens !== null) {
-    config.maxOutputTokens = profile.maxOutputTokens;
+    config.max_output_tokens = profile.maxOutputTokens;
   }
-  const thinkingLevel = toGeminiThinkingLevel(profile.reasoningEffort);
-  if (thinkingLevel !== undefined) {
-    config.thinkingConfig = { thinkingLevel, includeThoughts: true };
+  if (profile.reasoningEffort !== null) {
+    config.thinking_level = profile.reasoningEffort;
+    config.thinking_summaries = 'auto';
+  }
+  if (hasTools) {
+    config.tool_choice = 'auto';
   }
   return config;
 }
 
-function parseGeminiGenerateContentResponse(raw: unknown): LLMCompletionResponse {
-  const parsed = geminiGenerateContentResponseSchema.parse(raw);
-  const firstCandidate = parsed.candidates[0];
-  if (firstCandidate === undefined) {
-    throw new Error('Gemini generateContent returned no candidates.');
+function toGeminiInteractionTool(tool: ToolDefinition): Record<string, unknown> {
+  const responsesTool = tool.toResponsesTool();
+  return {
+    type: 'function',
+    name: responsesTool.name,
+    description: responsesTool.description,
+    parameters: stripUnsupportedSchemaProperties(responsesTool.parameters),
+  };
+}
+
+function stripUnsupportedSchemaProperties(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripUnsupportedSchemaProperties);
   }
-  const parts = firstCandidate.content.parts;
-  const text = parts
-    .flatMap((part) => (part.text === undefined || part.text.length === 0 || part.thought === true ? [] : [part.text]))
+  if (!isJsonObject(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== '$schema' && key !== 'additionalProperties')
+      .map(([key, child]) => [key, stripUnsupportedSchemaProperties(child)]),
+  );
+}
+
+function toGeminiInteractionSteps(message: Message): readonly Record<string, unknown>[] {
+  if (message.role === 'user') {
+    return [{ type: 'user_input', content: toGeminiContent(message.content) }];
+  }
+  if (message.role === 'tool') {
+    if (message.tool_call_id === null) {
+      throw new Error('Gemini function result requires a tool_call_id.');
+    }
+    const step: Record<string, unknown> = {
+      type: 'function_result',
+      call_id: message.tool_call_id,
+      result: toGeminiContent(message.content),
+    };
+    if (message.name !== null) {
+      step.name = message.name;
+    }
+    return [step];
+  }
+
+  const steps: Record<string, unknown>[] = [];
+  for (const block of message.thinking_blocks) {
+    if (block.type !== 'thinking') {
+      continue;
+    }
+    const step: Record<string, unknown> = {
+      type: 'thought',
+      summary: block.thinking.length === 0 ? [] : [{ type: 'text', text: block.thinking }],
+    };
+    if (block.signature !== null) {
+      step.signature = block.signature;
+    }
+    steps.push(step);
+  }
+  const content = toGeminiContent(message.content);
+  if (content.length > 0) {
+    steps.push({ type: 'model_output', content });
+  }
+  if (message.tool_calls !== null) {
+    steps.push(...message.tool_calls.map(toGeminiFunctionCallStep));
+  }
+  return steps;
+}
+
+function toGeminiContent(content: readonly Content[]): readonly Record<string, unknown>[] {
+  const result: Record<string, unknown>[] = [];
+  for (const item of content) {
+    if (item.type === 'text') {
+      if (item.text.length > 0) {
+        result.push({ type: 'text', text: item.text });
+      }
+    } else {
+      result.push(...item.image_urls.map((uri) => ({ type: 'image', uri })));
+    }
+  }
+  return result;
+}
+
+function toGeminiFunctionCallStep(toolCall: MessageToolCall): Record<string, unknown> {
+  return {
+    type: 'function_call',
+    id: toolCall.id,
+    name: toolCall.name,
+    arguments: parseFunctionCallArguments(toolCall),
+  };
+}
+
+function parseFunctionCallArguments(toolCall: MessageToolCall): JsonObject {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(toolCall.arguments) as unknown;
+  } catch {
+    throw new Error(`Gemini function call '${toolCall.id}' arguments must be a valid JSON object.`);
+  }
+  if (!isJsonObject(parsed)) {
+    throw new Error(`Gemini function call '${toolCall.id}' arguments must be a valid JSON object.`);
+  }
+  return parsed;
+}
+
+function parseGeminiInteractionResponse(raw: unknown): LLMCompletionResponse {
+  const parsed = geminiInteractionResponseSchema.parse(raw);
+  const modelOutputSteps = parsed.steps.filter((step): step is GeminiModelOutputStep => step.type === 'model_output');
+  const text = modelOutputSteps
+    .flatMap((step) => step.content)
+    .filter((content): content is GeminiTextContent => content.type === 'text')
+    .map((content) => content.text)
     .join('\n');
-  const reasoningContent = parts
-    .flatMap((part) => (part.text === undefined || part.text.length === 0 || part.thought !== true ? [] : [part.text]))
-    .join('');
-  const thoughtSignature = parts.find((part) => part.thoughtSignature !== undefined)?.thoughtSignature ?? null;
-  const toolCalls = parts
-    .flatMap((part, index) => (part.functionCall === undefined ? [] : [fromGeminiFunctionCall(part.functionCall, index)]));
-  const promptTokens = parsed.usageMetadata?.promptTokenCount ?? 0;
-  const completionTokens = parsed.usageMetadata?.candidatesTokenCount ?? 0;
-  const totalTokens = parsed.usageMetadata?.totalTokenCount ?? promptTokens + completionTokens;
+  const thoughtSteps = parsed.steps.filter((step): step is GeminiThoughtStep => step.type === 'thought');
+  const thinkingBlocks = thoughtSteps.map((step) => {
+    const thinking = step.summary
+      .filter((content): content is GeminiTextContent => content.type === 'text')
+      .map((content) => content.text)
+      .join('');
+    return { type: 'thinking' as const, thinking, signature: step.signature ?? null };
+  });
+  const reasoningContent = thinkingBlocks.map((block) => block.thinking).join('');
+  const toolCalls = parsed.steps
+    .filter((step): step is GeminiFunctionCallStep => step.type === 'function_call')
+    .map(fromGeminiFunctionCallStep);
 
   return llmCompletionResponseSchema.parse({
     message: {
@@ -173,35 +252,23 @@ function parseGeminiGenerateContentResponse(raw: unknown): LLMCompletionResponse
       content: text,
       tool_calls: toolCalls.length > 0 ? toolCalls : null,
       reasoning_content: reasoningContent.length > 0 ? reasoningContent : null,
-      thinking_blocks: thoughtSignature === null
-        ? []
-        : [{ type: 'thinking', thinking: reasoningContent, signature: thoughtSignature }],
+      thinking_blocks: thinkingBlocks,
     },
-    usage: { promptTokens, completionTokens, totalTokens },
+    usage: parsed.usage === null ? null : {
+      promptTokens: parsed.usage.total_input_tokens,
+      completionTokens: parsed.usage.total_output_tokens,
+      totalTokens: parsed.usage.total_tokens,
+    },
     raw,
   });
 }
 
-function firstThinkingSignature(message: Message): string | null {
-  return message.thinking_blocks.find(
-    (block): block is Extract<Message['thinking_blocks'][number], { type: 'thinking' }> => block.type === 'thinking' && block.signature !== null,
-  )?.signature ?? null;
-}
-
-function parseToolArguments(args: string): unknown {
-  try {
-    return JSON.parse(args) as unknown;
-  } catch {
-    return args;
-  }
-}
-
-function fromGeminiFunctionCall(functionCall: GeminiFunctionCall, index: number): MessageToolCall {
+function fromGeminiFunctionCallStep(step: GeminiFunctionCallStep): MessageToolCall {
   return {
-    id: `gemini_call_${index}`,
+    id: step.id,
     responses_item_id: null,
-    name: functionCall.name,
-    arguments: JSON.stringify(functionCall.args ?? {}),
+    name: step.name,
+    arguments: JSON.stringify(step.arguments),
     origin: 'completion',
   };
 }
@@ -225,41 +292,58 @@ async function defaultFetch(
   return globalThis.fetch(url, init);
 }
 
-const geminiFunctionCallSchema = z
-  .object({ name: z.string(), args: z.unknown().optional() })
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const geminiTextContentSchema = z.object({ type: z.literal('text'), text: z.string() }).passthrough();
+const geminiOtherContentSchema = z
+  .object({ type: z.string().refine((type) => type !== 'text') })
   .passthrough();
-const geminiPartSchema = z
+const geminiContentSchema = z.union([geminiTextContentSchema, geminiOtherContentSchema]);
+const geminiModelOutputStepSchema = z
+  .object({ type: z.literal('model_output'), content: z.array(geminiContentSchema).default([]) })
+  .passthrough();
+const geminiThoughtStepSchema = z
   .object({
-    text: z.string().optional(),
-    thought: z.boolean().optional(),
-    thoughtSignature: z.string().optional(),
-    functionCall: geminiFunctionCallSchema.optional(),
+    type: z.literal('thought'),
+    signature: z.string().nullable().optional(),
+    summary: z.array(geminiContentSchema).default([]),
+  })
+  .passthrough();
+const geminiFunctionCallStepSchema = z
+  .object({
+    type: z.literal('function_call'),
+    id: z.string(),
+    name: z.string(),
+    arguments: z.record(z.string(), z.unknown()),
+  })
+  .passthrough();
+const knownGeminiStepTypes = new Set(['model_output', 'thought', 'function_call']);
+const geminiOtherStepSchema = z
+  .object({ type: z.string().refine((type) => !knownGeminiStepTypes.has(type)) })
+  .passthrough();
+const geminiStepSchema = z.union([
+  geminiModelOutputStepSchema,
+  geminiThoughtStepSchema,
+  geminiFunctionCallStepSchema,
+  geminiOtherStepSchema,
+]);
+const geminiUsageSchema = z
+  .object({
+    total_input_tokens: z.number().int().min(0).default(0),
+    total_output_tokens: z.number().int().min(0).default(0),
+    total_tokens: z.number().int().min(0).default(0),
+  })
+  .passthrough();
+const geminiInteractionResponseSchema = z
+  .object({
+    steps: z.array(geminiStepSchema).default([]),
+    usage: geminiUsageSchema.nullable().default(null),
   })
   .passthrough();
 
-type GeminiFunctionCall = z.infer<typeof geminiFunctionCallSchema>;
-
-const geminiGenerateContentResponseSchema = z
-  .object({
-    candidates: z.array(
-      z
-        .object({
-          content: z
-            .object({
-              role: z.string().default('model'),
-              parts: z.array(geminiPartSchema).default([]),
-            })
-            .passthrough(),
-        })
-        .passthrough(),
-    ),
-    usageMetadata: z
-      .object({
-        promptTokenCount: z.number().int().min(0).optional(),
-        candidatesTokenCount: z.number().int().min(0).optional(),
-        totalTokenCount: z.number().int().min(0).optional(),
-      })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough();
+type GeminiTextContent = z.infer<typeof geminiTextContentSchema>;
+type GeminiModelOutputStep = z.infer<typeof geminiModelOutputStepSchema>;
+type GeminiThoughtStep = z.infer<typeof geminiThoughtStepSchema>;
+type GeminiFunctionCallStep = z.infer<typeof geminiFunctionCallStepSchema>;

@@ -18,7 +18,7 @@ The actual SDK path is `src/llm/`, not `packages/agent-sdk/src/sdk/llm/` in this
 | OpenAI Responses API | `src/llm/openai.ts` / `OpenAIResponsesClient` | Uses `/responses`; sends `reasoning.effort` and `reasoning.summary`. |
 | OpenAI-compatible Chat Completions | `src/llm/openai.ts` / `OpenAIChatClient` | Uses `/chat/completions`; direct OpenAI chat, OpenRouter, LiteLLM proxy, and OpenAI-compatible proxies currently share this transport. |
 | Anthropic Messages API | `src/llm/anthropic.ts` / `AnthropicMessagesClient` | Uses `/v1/messages`; current code derives `thinking: { type: 'enabled', budget_tokens }` from legacy `reasoningEffort`. |
-| Gemini GenerateContent API | `src/llm/gemini.ts` / `GeminiClient` | Uses `:generateContent`; current code maps legacy `reasoningEffort` to `generationConfig.thinkingConfig.thinkingLevel`. Gemini Interactions is not implemented yet. |
+| Gemini Interactions API | `src/llm/gemini.ts` / `GeminiClient` | Uses `/v1beta/interactions` with `store: false`; maps legacy `reasoningEffort` to lower-case `generation_config.thinking_level`, requests automatic thought summaries, and replays signed thought/function steps from the durable transcript. |
 
 `src/llm/factory.ts` resolves `providerId` / `baseUrl` to Anthropic, Gemini, OpenAI Responses, or OpenAI-compatible Chat. For `openrouter` and `litellm_proxy`, the current transport is OpenAI-compatible Chat, but the upstream model family may still be Anthropic, Gemini, or OpenAI.
 
@@ -210,8 +210,8 @@ Anthropic and LiteLLM credentials/base URLs were not available in this environme
 | Anthropic modern adaptive models | `output_config.effort` and `thinking: { type: "adaptive" }` where applicable | effort values include `low`, `medium`, `high`, `xhigh`, `max`, with model restrictions: `xhigh` only on Fable 5, Mythos 5, Opus 4.8, Opus 4.7, Sonnet 5 per docs; `max` availability differs by model | Current code converts legacy `reasoningEffort` to manual `budget_tokens`, which is wrong for Fable 5, Opus 4.8, Sonnet 5, and deprecated for Sonnet/Opus 4.6. |
 | Anthropic manual thinking models | `thinking: { type: "enabled", budget_tokens, display? }` | explicit token budget less than `max_tokens`; display values include `summarized`, `omitted` where supported | Current code invents budget from legacy effort. Replace with explicit budget config. |
 | Anthropic task budgets beta | `output_config.task_budget` plus beta header | `{ type: "tokens", total, remaining? }` and opt-in beta header | Useful for future agent loops; should not be folded into a simple effort enum. |
-| Gemini Interactions | `generation_config.thinking_level`, `generation_config.thinking_summaries` | lower-case model-specific values such as `minimal`, `low`, `medium`, `high`; exact set depends on model | Not implemented. It should be the target for Gemini reasoning continuity. |
-| Gemini GenerateContent | `generationConfig.thinkingConfig` | mutually exclusive level or budget branches: level values `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, or a numeric `thinkingBudget`; `includeThoughts` may accompany either branch | Current code maps OpenAI low/medium/high to upper-case; misses `MINIMAL` and model-specific validation. |
+| Gemini Interactions | `generation_config.thinking_level`, `generation_config.thinking_summaries` | lower-case model-specific values such as `minimal`, `low`, `medium`, `high`; exact set depends on model | Implemented with the legacy profile's `low`, `medium`, `high` subset and automatic summaries; model-specific capability validation remains future work. |
+| Gemini GenerateContent | `generationConfig.thinkingConfig` | mutually exclusive level or budget branches: level values `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, or a numeric `thinkingBudget`; `includeThoughts` may accompany either branch | No longer used by `GeminiClient`; retained here only as research evidence for the distinct legacy API. |
 | LiteLLM proxy / OpenAI-compatible transport | transport remains OpenAI-compatible, but upstream model family comes from proxy alias/prefix/config | Resolve capabilities from upstream namespace: `anthropic/...`, `gemini/...`, `openai/...`, known `claude`/`gemini`/`gpt` aliases, or explicit profile metadata | Current factory treats `litellm_proxy` as generic OpenAI-compatible Chat, so it cannot expose native Anthropic/Gemini semantics. |
 
 
@@ -411,8 +411,8 @@ Invalid reasoning config for gpt-5.6 via openai_chat_completions: reasoning.effo
 1. Add the capability resolver and tests without changing request builders.
 2. Add `reasoning` to the serializable `LLMProfile` schema and migration helpers.
 3. Update OpenAI builders first because live evidence is complete for GPT-5.6.
-4. Add Gemini Interactions as a new concrete client/API target; do not retrofit Interactions semantics into `GeminiClient`/GenerateContent.
-5. Update GenerateContent to use provider-native `reasoning.api: 'gemini_generate_content'` only.
+4. Extend the implemented Gemini Interactions transport with provider-native capability records; the tool-calling work migrated `GeminiClient` and did not retain a second GenerateContent client.
+5. Keep GenerateContent capability evidence separate from Interactions; reintroduce a legacy client only if a concrete product requirement appears.
 6. Update Anthropic after live credentials are available for the requested model set.
 7. Add LiteLLM/OpenRouter upstream-family capability resolution; require explicit `upstreamProviderId` when aliases are ambiguous.
 

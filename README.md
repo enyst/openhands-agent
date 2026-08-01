@@ -4,7 +4,7 @@ Idiomatic TypeScript transpilation of the [OpenHands](https://github.com/OpenHan
 
 ## Status
 
-`0.3.3` is the native OpenAI tool-completion parity release of the fresh TypeScript transpilation. It covers the core SDK surfaces needed to build and run agent loops locally, passes usable Agent tools through OpenAI Chat Completions and Responses, and documents the main architecture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
+`0.3.3` established native OpenAI tool-completion parity. The current development line extends the same `ToolDefinition` flow through Anthropic Messages, Gemini Interactions, OpenRouter, LiteLLM-compatible endpoints, and custom OpenAI-compatible gateways. The main architecture is documented in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
 
 - zod-backed event, tool, settings, profile, and serialization models
 - profile-first LLM clients for OpenAI chat completions, OpenAI Responses, Anthropic, Gemini, and OpenAI-compatible profiles
@@ -18,7 +18,7 @@ Intentional deviations from Python remain: no ACP runtime, security analyzers, r
 
 This package is tracking the Python `agent-sdk` architecture while staying idiomatic TypeScript. The implemented surfaces currently include focused parity coverage for:
 
-- LLM message/content serialization, Agent-to-LLM `ToolDefinition` propagation, and provider-owned OpenAI chat completions/Responses, Anthropic, and Gemini request/response mapping
+- LLM message/content serialization, Agent-to-LLM `ToolDefinition` propagation, and provider-owned OpenAI chat completions/Responses, Anthropic Messages, and Gemini Interactions request/response mapping
 - event schemas and `eventsToMessages` conversion, including parallel tool-call batching behavior
 - conversation state, local/remote conversations, pause/resume, restore, parallel execution, and stuck detection
 - settings/profiles, profile-selected LLM field hygiene, provider/profile-scoped API key references, and keyring-backed secret storage
@@ -32,10 +32,17 @@ Accepted deviations are deliberate and should not be treated as missing work unl
 - **Type enforcement.** Strict TypeScript everywhere; runtime validation via [zod v4](https://github.com/colinhacks/zod) (replacing pydantic), using its native `z.toJSONSchema()` for tool/settings schema generation.
 - **Fresh transpilation.** We do **not** copy existing code. The earlier TS attempt in `oh-tab` is outdated and serves only as a reference for product-level profile semantics, tooling, and tests.
 - **Profile-first product LLM boundary.** Product and REST callers select an `LLMProfile`; they do not pass raw Python-style `LLM` objects or loose model/provider fields. Low-level provider clients remain available as explicit advanced SDK/test building blocks.
-- **API-native provider clients.** Implement provider APIs as they actually are — OpenAI-compatible Chat Completions, OpenAI Responses, Anthropic Messages, and Gemini GenerateContent — rather than flattening provider-specific reasoning, caching, tool-call, and replay behavior into a leaky abstraction.
+- **API-native provider clients.** Implement provider APIs as they actually are — OpenAI-compatible Chat Completions, OpenAI Responses, Anthropic Messages, and Gemini Interactions — rather than flattening provider-specific reasoning, caching, tool-call, and replay behavior into a leaky abstraction.
 - **Host-owned profile persistence.** This package validates and consumes `LLMProfile` records but does not choose a global local profile database/path. Host products persist profile JSON in their own settings stores and pass selected profiles to the SDK.
 - **Lower-risk secret handling.** Do not port Python's plaintext/local plus encrypted-at-rest remote secret stack. Persist secret references only; store actual secret values in the OS keyring under the `openhands` service. LLM API keys are provider-scoped by default, with per-profile overrides for cases like multiple proxy profiles for the same provider.
 - **Tooling parity with `oh-tab`.** Same npm/build/test stack (tsup, vitest, eslint type-checked) unless there's a good reason to diverge.
+
+## OpenAI-compatible native tools
+
+`providerId: 'openrouter'`, `providerId: 'litellm_proxy'`, and custom OpenAI-compatible `baseUrl` profiles use `OpenAIChatClient`. Native tools are sent with the standard Chat Completions function shape, and tool calls/results use assistant `tool_calls` plus `role: 'tool'` messages. OpenRouter's standard endpoint and configurable LiteLLM-compatible/custom base URLs are covered by transport tests.
+
+Compatibility here means the endpoint accepts the OpenAI Chat Completions dialect at `<baseUrl>/chat/completions` with bearer authentication. The SDK does not translate tools into an upstream provider's native Anthropic or Gemini dialect when that provider sits behind a proxy, and it does not guess nonstandard proxy payloads. Configure such gateways to expose the Chat Completions function-tool contract or provide a provider-specific adapter.
+
 
 ## Tooling
 
@@ -112,12 +119,14 @@ console.log(state.executionStatus);
 
 ## Examples
 
-Runnable TypeScript examples live in [`examples/`](examples/) and are checked by `npm run test:examples`. Real-LLM examples use [`examples/_shared/exampleProfile.ts`](examples/_shared/exampleProfile.ts): by default set `OPENAI_API_KEY` to run them against an OpenAI LLM profile, or set `LLM_PROVIDER_ID`/`LLM_PROVIDER` and the matching `<PROVIDER>_API_KEY` env var to exercise another provider. The helper stores keys under `llmProviderSecretRef(profile.providerId)`, optionally overrides the model with `OPENAI_MODEL` or `LLM_MODEL`, and skips gracefully when no provider key is present.
+Runnable TypeScript examples live in [`examples/`](examples/) and are checked by `npm run test:examples`. Real-LLM examples use [`examples/_shared/exampleProfile.ts`](examples/_shared/exampleProfile.ts): by default set `OPENAI_API_KEY` to run them against an OpenAI LLM profile, or set `LLM_PROVIDER_ID`/`LLM_PROVIDER` and the matching `<PROVIDER>_API_KEY` env var to exercise another provider. The helper stores keys under `llmProviderSecretRef(profile.providerId)`, optionally overrides the model with `OPENAI_MODEL` or `LLM_MODEL`, and skips gracefully when no provider key is present. `npm run live:gemini-tools` is the opt-in Gemini native-tool smoke; Anthropic tool coverage is recorded-shape/unit-only and makes no live request by default.
 
 | Example | Covers |
 |---------|--------|
 | [`hello-world.ts`](examples/hello-world.ts) | Real OpenAI profile completion through the shared env-backed example profile helper |
 | [`native-openai-tools.ts`](examples/native-openai-tools.ts) | Real OpenAI Responses read/edit/finish function calls through Agent tool dispatch |
+| [`native-gemini-tools.ts`](examples/native-gemini-tools.ts) | Credential-gated Gemini Interactions tool dispatch; defaults to `gemini-3.5-flash-lite` |
+| [`native-tool-serialization.ts`](examples/native-tool-serialization.ts) | Keyless comparison of one `ToolDefinition` across all four provider wire formats |
 | [`tools.ts`](examples/tools.ts) | Concrete terminal, file editor, glob, grep, and task tracker tools |
 | [`profiles-and-secrets.ts`](examples/profiles-and-secrets.ts) | Provider/profile-scoped LLM API key references and secret store usage |
 | [`agent-settings.ts`](examples/agent-settings.ts) | Agent settings/profile validation and profile-selected raw LLM field cleanup |
