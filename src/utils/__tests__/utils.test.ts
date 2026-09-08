@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -10,6 +10,7 @@ import {
   displayJson,
   dumps,
   executeCommand,
+  getUserPersistenceDir,
   handleDeprecatedModelFields,
   isAbsolutePathSource,
   isHostAbsolutePath,
@@ -79,6 +80,29 @@ describe('maybeTruncate', () => {
 });
 
 describe('path utilities', () => {
+  it('resolves the user persistence dir from OH_PERSISTENCE_DIR or the ~/.openhands default', () => {
+    const original = process.env.OH_PERSISTENCE_DIR;
+    try {
+      delete process.env.OH_PERSISTENCE_DIR;
+      expect(getUserPersistenceDir()).toBe(join(homedir(), '.openhands'));
+
+      process.env.OH_PERSISTENCE_DIR = '/custom/persist';
+      expect(getUserPersistenceDir()).toBe('/custom/persist');
+
+      process.env.OH_PERSISTENCE_DIR = '/custom/persist';
+      expect(getUserPersistenceDir('/fallback')).toBe('/custom/persist');
+
+      process.env.OH_PERSISTENCE_DIR = 'relative/persist';
+      expect(getUserPersistenceDir()).toBe(resolve('relative/persist'));
+    } finally {
+      if (original === undefined) {
+        delete process.env.OH_PERSISTENCE_DIR;
+      } else {
+        process.env.OH_PERSISTENCE_DIR = original;
+      }
+    }
+  });
+
   it('normalizes path display strings to POSIX separators without resolving', () => {
     expect(toPosixPath(String.raw`C:\work\repo\file.py`)).toBe('C:/work/repo/file.py');
     expect(posixPathName(String.raw`C:\work\repo\file.py`)).toBe('file.py');
@@ -149,6 +173,24 @@ describe('command utilities', () => {
     const result = sanitizedEnv({ LD_LIBRARY_PATH: '/pyinstaller', LD_LIBRARY_PATH_ORIG: '' });
 
     expect(result).toEqual({ LD_LIBRARY_PATH_ORIG: '' });
+  });
+
+  it('strips session, cipher, and indexed session-key slots while preserving other vars', () => {
+    const result = sanitizedEnv({
+      SESSION_API_KEY: 'v0-session',
+      OH_SECRET_KEY: 'cipher-secret',
+      OH_SESSION_API_KEYS_0: 'v1-session-0',
+      OH_SESSION_API_KEYS_1: 'v1-session-1',
+      OH_WEB_URL: 'https://example.test',
+      FOO: 'bar',
+    });
+
+    expect(result).not.toHaveProperty('SESSION_API_KEY');
+    expect(result).not.toHaveProperty('OH_SECRET_KEY');
+    expect(result).not.toHaveProperty('OH_SESSION_API_KEYS_0');
+    expect(result).not.toHaveProperty('OH_SESSION_API_KEYS_1');
+    expect(result.OH_WEB_URL).toBe('https://example.test');
+    expect(result.FOO).toBe('bar');
   });
 
   it('executes commands and captures stdout and stderr', () => {
