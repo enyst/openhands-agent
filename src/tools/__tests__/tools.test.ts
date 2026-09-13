@@ -20,6 +20,54 @@ describe('TerminalExecutor', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('kills a command that exceeds its timeout and reports it as a timeout', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openhands-terminal-'));
+    try {
+      const result = await new TerminalExecutor({ workingDir: root }).execute({ command: 'echo partial && sleep 5', timeout: 1 });
+
+      expect(result.is_error).toBe(true);
+      expect(result.timeout).toBe(true);
+      expect(result.exit_code).toBe(-1);
+      expect(result.text).toContain('partial');
+      expect(result.text).toContain('timed out after 1s');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('applies a bounded default timeout instead of blocking forever', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openhands-terminal-'));
+    try {
+      const result = await new TerminalExecutor({ workingDir: root, defaultTimeoutSeconds: 1 }).execute({ command: 'sleep 5' });
+
+      expect(result.timeout).toBe(true);
+      expect(result.exit_code).toBe(-1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a missing working directory instead of an empty failure', async () => {
+    const result = await new TerminalExecutor({ workingDir: join(tmpdir(), 'openhands-terminal-does-not-exist') }).execute({ command: 'pwd' });
+
+    expect(result.is_error).toBe(true);
+    expect(result.exit_code).toBe(-1);
+    expect(result.text).toContain('Working directory does not exist');
+  });
+
+  it('never returns an empty observation for a failed command', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openhands-terminal-'));
+    try {
+      const result = await new TerminalExecutor({ workingDir: root }).execute({ command: 'exit 3' });
+
+      expect(result.is_error).toBe(true);
+      expect(result.exit_code).toBe(3);
+      expect(result.text.length).toBeGreaterThan(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('FileEditorExecutor', () => {

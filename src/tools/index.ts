@@ -16,18 +16,44 @@ export const terminalObservationSchema = baseToolObservationSchema.extend({ comm
 export type TerminalAction = z.infer<typeof terminalActionSchema>;
 export type TerminalObservation = z.infer<typeof terminalObservationSchema>;
 
+/**
+ * Hard cap applied when the model does not pass an explicit `timeout`. Upstream never blocks the agent
+ * loop forever: its tmux executor returns to the model after 30s without output (soft timeout, exit code
+ * -1). This executor cannot resume a still-running process, so it enforces a bounded hard timeout instead
+ * and reports it as `timeout: true`. The model can raise the limit per command.
+ */
+export const DEFAULT_TERMINAL_TIMEOUT_SECONDS = 300;
+const TERMINAL_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
+
 export class TerminalExecutor {
   readonly workingDir: string;
-  constructor(options: { readonly workingDir: string }) { this.workingDir = options.workingDir; }
+  readonly defaultTimeoutSeconds: number;
+  constructor(options: { readonly workingDir: string; readonly defaultTimeoutSeconds?: number }) {
+    this.workingDir = options.workingDir;
+    this.defaultTimeoutSeconds = options.defaultTimeoutSeconds ?? DEFAULT_TERMINAL_TIMEOUT_SECONDS;
+  }
   async execute(action: TerminalAction): Promise<TerminalObservation> {
     const parsed = terminalActionSchema.parse(action);
     if (parsed.is_input) return { text: 'Interactive input is not supported by this executor.', is_error: true, command: parsed.command, exit_code: null, timeout: false };
     try {
-      const { stdout, stderr } = await execAsync(parsed.command, { cwd: this.workingDir, timeout: parsed.timeout === null ? undefined : parsed.timeout * 1000 });
+      const cwd = await stat(this.workingDir);
+      if (!cwd.isDirectory()) throw new Error('not a directory');
+    } catch {
+      return { text: `Working directory does not exist: ${this.workingDir}`, is_error: true, command: parsed.command, exit_code: -1, timeout: false };
+    }
+    const timeoutSeconds = parsed.timeout === null ? this.defaultTimeoutSeconds : parsed.timeout;
+    try {
+      const { stdout, stderr } = await execAsync(parsed.command, { cwd: this.workingDir, timeout: timeoutSeconds * 1000, maxBuffer: TERMINAL_MAX_BUFFER_BYTES });
       return { text: `${stdout}${stderr}`, is_error: false, command: parsed.command, exit_code: 0, timeout: false };
     } catch (error) {
-      const err = error as { stdout?: string; stderr?: string; code?: number; killed?: boolean };
-      return { text: `${err.stdout ?? ''}${err.stderr ?? String(error)}`, is_error: true, command: parsed.command, exit_code: typeof err.code === 'number' ? err.code : -1, timeout: err.killed ?? false };
+      const err = error as { stdout?: string; stderr?: string; code?: number | string; killed?: boolean; signal?: string; message?: string };
+      const timedOut = err.killed === true || err.signal === 'SIGTERM';
+      const output = `${err.stdout ?? ''}${err.stderr ?? ''}`;
+      const detail = timedOut
+        ? `Command timed out after ${timeoutSeconds}s and was killed. Pass a larger \`timeout\` for long-running commands, or run servers in the background.`
+        : output.length > 0 ? '' : (err.message ?? String(error));
+      const text = output.length > 0 && detail.length > 0 ? `${output}\n${detail}` : output.length > 0 ? output : detail;
+      return { text, is_error: true, command: parsed.command, exit_code: typeof err.code === 'number' ? err.code : -1, timeout: timedOut };
     }
   }
 }
@@ -35,7 +61,7 @@ export class TerminalExecutor {
 export class TerminalTool {
   static create(options: { readonly workingDir: string }): ToolDefinition<typeof terminalActionSchema, typeof terminalObservationSchema> {
     const executor = new TerminalExecutor(options);
-    return new ToolDefinition({ name: 'terminal', description: 'Execute a shell command in the project workspace.', inputSchema: terminalActionSchema, outputSchema: terminalObservationSchema, annotations: toolAnnotationsSchema.parse({ title: 'terminal', openWorldHint: false }), executor: (action) => executor.execute(action) });
+    return new ToolDefinition({ name: 'terminal', description: `Execute a shell command in the project workspace. Commands are killed after \`timeout\` seconds (default ${DEFAULT_TERMINAL_TIMEOUT_SECONDS}); pass a larger timeout for installs or test suites, and start long-lived servers in the background.`, inputSchema: terminalActionSchema, outputSchema: terminalObservationSchema, annotations: toolAnnotationsSchema.parse({ title: 'terminal', openWorldHint: false }), executor: (action) => executor.execute(action) });
   }
 }
 
