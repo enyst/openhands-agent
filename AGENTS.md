@@ -4,6 +4,7 @@ Before changing transpilation behavior:
 
 1. Read `docs/TRANSPILE_CONTRACT.md`.
 2. When touching the upstream pin, drift reports, or parity tooling, also read `docs/DRIFT_TOOLING.md`.
+   When running as the unattended weekly pin advance, follow `docs/DRIFT_AUTOMATION.md` step by step.
 3. Read current code and tests before trusting status notes or old architecture prose.
 4. Work against a finite upstream interval `OLD_PIN..NEW_PIN`; never treat moving `HEAD` as the unit of work.
 5. Classify upstream changes before coding: `PORT`, `NO_TARGET_CHANGE`, `DEVIATION`, `EXCLUDED`, or `DEFERRED`.
