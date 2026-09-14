@@ -122,6 +122,14 @@ Keep the shared `LLMClient` boundary thin. Provider clients own provider-specifi
 
 Product dispatch is profile-first. Credential lookup is provider-driven rather than inferred from model-family names. No implicit fallback model chain.
 
+### Provider compatibility without LiteLLM
+
+The Python SDK delegates part of provider compatibility to LiteLLM and its dependencies. This TypeScript SDK implements provider protocols directly, so it must own the equivalent request/response normalization, capability decisions, and continuation handling. A provider quirk may require a TypeScript fix even when no Python SDK source, test, or upstream pin has changed. Absence of a matching Python diff is not grounds to reject or remove that fix.
+
+Compatibility is judged by observable behavior through the SDK, including the behavior supplied by upstream dependencies. Implementing equivalent provider handling is ordinary compatibility work, not automatically a `DEV-*` deviation or `EXT-*` extension. When classifying a finite upstream interval, use `PORT` if the target needs such a fix. Independently discovered provider bugs can be fixed without advancing the pin or inventing an upstream review unit. Intentional semantic differences still require the existing policy process.
+
+Keep protocol normalization in the owning provider client and reusable capability decisions in small, pure provider helpers. Do not spread provider switches into agents, conversations, tools, servers, or bridges. Accept harmless extra wire fields only where safe, keep required fields validated, and preserve metadata needed for tool/reasoning continuation. A quirk must have a regression test from upstream evidence or a sanitized provider request/response fixture; when no Python test exists, demonstrate the failure with that fixture before fixing it. See [LLM provider implementation](LLM_PROVIDERS.md) for placement and test guidance.
+
 ## Tests-first rule
 
 For every upstream behavior change that requires target work:
