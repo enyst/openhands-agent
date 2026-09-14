@@ -47,7 +47,7 @@ Every meaningful in-scope upstream change reviewed during a pin advance gets exa
 | `DEVIATION` | The area is relevant to this transpilation, but target behavior intentionally differs. Reference a `DEV-*` policy ID. |
 | `EXCLUDED` | The upstream subsystem is outside this transpilation's declared scope. Reference an `EXC-*` policy ID. |
 | `DEFERRED` | In scope, but intentionally not implemented yet. Record the compatibility consequence and tracking item. |
-| `DELEGATED` | The unit belongs to a target this repository does not own (the `server` target, reviewed in `smolpaws/smolpaws/packages/openhands-agent-server`). The decision is recorded there, not here. Only valid for non-owned targets. |
+| `DELEGATED` | The unit belongs to a target this repository does not own (the `server` target, reviewed in `smolpaws/smolpaws/packages/openhands-agent-server`). The decision is recorded there, not here. Required for, and only valid for, non-owned targets; `drift:prepare` pre-fills it and `drift:check` rejects any other disposition on them. |
 
 `DEVIATION` and `EXCLUDED` are both departures from upstream in ordinary language. We distinguish them because maintenance differs: upstream changes under a `DEVIATION` must still be reviewed against our alternative behavior; changes wholly within an `EXCLUDED` subsystem do not create port work unless scope changes.
 

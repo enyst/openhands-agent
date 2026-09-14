@@ -148,7 +148,7 @@ Both phases regenerate the interval from git and verify that:
 - no stale/unknown annotation remains;
 - every unmapped path has an explanation;
 - `NO_TARGET_CHANGE` has a concrete reason;
-- `DELEGATED` is used only for targets this repository does not own (`server`);
+- `DELEGATED` is required for, and only valid for, targets this repository does not own (`server`); `prepare` pre-fills it;
 - `DEVIATION` and `EXCLUDED` use a known policy for the correct target;
 - `EXCLUDED` covers every changed file in that unit, preventing mixed commits from being filtered wholesale;
 - `DEFERRED` has tracking, a compatibility consequence, and a revisit trigger;

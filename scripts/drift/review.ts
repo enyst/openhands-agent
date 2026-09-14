@@ -37,7 +37,7 @@ export function prepareReview(inventory: DriftInventory): DriftReview {
   for (const commit of inventory.commits) {
     for (const target of ['sdk', 'server'] as const) {
       if (commit.units[target] === undefined) continue;
-      items[unitId(commit.sha, target)] = emptyReviewItem();
+      items[unitId(commit.sha, target)] = DELEGATED_TARGETS.includes(target) ? delegatedReviewItem() : emptyReviewItem();
     }
     for (const path of commit.unmappedPaths) unmapped[unmappedId(commit.sha, path)] = null;
   }
@@ -150,6 +150,9 @@ function validateItem(
   if (item.disposition === 'DELEGATED' && !DELEGATED_TARGETS.includes(target)) {
     errors.push(`${key} cannot be DELEGATED: this repository owns the ${target} target`);
   }
+  if (item.disposition !== 'DELEGATED' && DELEGATED_TARGETS.includes(target)) {
+    errors.push(`${key} must be DELEGATED: the ${target} target is reviewed in its own package, not here`);
+  }
   if (item.docsImpact === null || !DOCS_IMPACTS.includes(item.docsImpact)) {
     errors.push(`${key} must classify documentation impact`);
   } else if (item.docsImpact === 'update' && item.docs.length === 0) {
@@ -219,6 +222,16 @@ function parseReview(value: unknown): DriftReview {
     inventorySha256: hash(root.inventorySha256, 'review.inventorySha256'),
     items,
     unmapped,
+  };
+}
+
+/** Units of a target this repository does not own arrive pre-classified; the decision is recorded elsewhere. */
+function delegatedReviewItem(): ReviewItem {
+  return {
+    ...emptyReviewItem(),
+    disposition: 'DELEGATED',
+    reason: 'openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package\'s server review record.',
+    docsImpact: 'none',
   };
 }
 

@@ -133,7 +133,7 @@ Disposition guide:
 | Touches confirmation gates, security analyzers, cipher/secret persistence, ACP runtime | `DEVIATION` | `policy: "DEV-SDK-00x"` |
 | Entirely inside plugin or marketplace runtime | `EXCLUDED` | `policy: "EXC-SDK-00x"`; every changed file must be under that exclusion |
 | In scope, real behavior change, but not portable this run | `DEFERRED` | `tracking`, `compatibilityConsequence`, `revisitTrigger` |
-| Target is `server` | `DELEGATED` | reason: `openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package's server review record.` |
+| Target is `server` | `DELEGATED` | already filled in by `drift:prepare` (reason: `openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package's server review record.`); leave it, `drift:check` rejects any other disposition on server units |
 
 Every key under `unmapped` needs a short string explanation (for example
 `"clients/typescript: upstream TS client, not part of this transpile"`). If a

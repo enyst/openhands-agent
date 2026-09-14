@@ -123,7 +123,7 @@ test('review validation distinguishes review completeness from close evidence', 
   }
 });
 
-test('DELEGATED is accepted for server units and rejected for sdk units', async () => {
+test('server units are pre-filled DELEGATED, must stay DELEGATED, and sdk units never can be', async () => {
   const fixture = await createFixture();
   try {
     await put(fixture.path, 'openhands-agent-server/openhands/agent_server/api.py', 'api v2\n');
@@ -136,9 +136,9 @@ test('DELEGATED is accepted for server units and rejected for sdk units', async 
     const sdk = review.items[unitId(changed, 'sdk')];
     assert.ok(server);
     assert.ok(sdk);
-    server.disposition = 'DELEGATED';
-    server.reason = 'Reviewed in the server package record.';
-    server.docsImpact = 'none';
+    // prepareReview already delegates the server unit; the SDK unit still needs a real decision.
+    assert.equal(server.disposition, 'DELEGATED');
+    assert.equal(sdk.disposition, null);
     sdk.disposition = 'DELEGATED';
     sdk.reason = 'Trying to punt an owned target.';
     sdk.docsImpact = 'none';
@@ -150,6 +150,12 @@ test('DELEGATED is accepted for server units and rejected for sdk units', async 
     sdk.disposition = 'NO_TARGET_CHANGE';
     sdk.reason = 'Formatting-only change with no behavioral effect.';
     assert.deepEqual(validateReview(inventory, review, manifest, 'close'), []);
+
+    // A semantic server decision made here is rejected: it belongs in the server package's record.
+    server.disposition = 'NO_TARGET_CHANGE';
+    server.reason = 'Version bump only.';
+    const notDelegated = validateReview(inventory, review, manifest, 'close');
+    assert.ok(notDelegated.some((error) => error.includes(`${unitId(changed, 'server')} must be DELEGATED`)));
   } finally {
     await rm(fixture.path, { recursive: true, force: true });
   }
