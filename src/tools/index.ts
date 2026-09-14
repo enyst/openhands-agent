@@ -20,7 +20,8 @@ export type TerminalObservation = z.infer<typeof terminalObservationSchema>;
  * Hard cap applied when the model does not pass an explicit `timeout`. Upstream never blocks the agent
  * loop forever: its tmux executor returns to the model after 30s without output (soft timeout, exit code
  * -1). This executor cannot resume a still-running process, so it enforces a bounded hard timeout instead
- * and reports it as `timeout: true`. The model can raise the limit per command.
+ * and reports it as `timeout: true`. The model can raise the limit per command; an explicit `timeout: 0`
+ * means no limit (Node's `exec` semantics), which is deliberate for commands with a known long duration.
  */
 export const DEFAULT_TERMINAL_TIMEOUT_SECONDS = 300;
 const TERMINAL_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
@@ -61,7 +62,7 @@ export class TerminalExecutor {
 export class TerminalTool {
   static create(options: { readonly workingDir: string }): ToolDefinition<typeof terminalActionSchema, typeof terminalObservationSchema> {
     const executor = new TerminalExecutor(options);
-    return new ToolDefinition({ name: 'terminal', description: `Execute a shell command in the project workspace. Commands are killed after \`timeout\` seconds (default ${DEFAULT_TERMINAL_TIMEOUT_SECONDS}); pass a larger timeout for installs or test suites, and start long-lived servers in the background.`, inputSchema: terminalActionSchema, outputSchema: terminalObservationSchema, annotations: toolAnnotationsSchema.parse({ title: 'terminal', openWorldHint: false }), executor: (action) => executor.execute(action) });
+    return new ToolDefinition({ name: 'terminal', description: `Execute a shell command in the project workspace. Commands are killed after \`timeout\` seconds (default ${DEFAULT_TERMINAL_TIMEOUT_SECONDS}; 0 means no limit); pass a larger timeout for installs or test suites, and start long-lived servers in the background.`, inputSchema: terminalActionSchema, outputSchema: terminalObservationSchema, annotations: toolAnnotationsSchema.parse({ title: 'terminal', openWorldHint: false }), executor: (action) => executor.execute(action) });
   }
 }
 

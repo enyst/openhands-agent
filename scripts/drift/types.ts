@@ -95,7 +95,9 @@ export type Disposition =
   | 'NO_TARGET_CHANGE'
   | 'DEVIATION'
   | 'EXCLUDED'
-  | 'DEFERRED';
+  | 'DEFERRED'
+  /** Decided in the repository that owns the target (server units reviewed in smolpaws), not here. */
+  | 'DELEGATED';
 
 export type DocsImpact = 'none' | 'update';
 

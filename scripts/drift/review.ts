@@ -21,7 +21,10 @@ const DISPOSITIONS: readonly Disposition[] = [
   'DEVIATION',
   'EXCLUDED',
   'DEFERRED',
+  'DELEGATED',
 ];
+/** Targets this repository does not own; their units may only be DELEGATED (or classified with a reason). */
+const DELEGATED_TARGETS: readonly TargetName[] = ['server'];
 const DOCS_IMPACTS: readonly DocsImpact[] = ['none', 'update'];
 
 export function inventoryHash(inventory: DriftInventory): string {
@@ -144,6 +147,9 @@ function validateItem(
     return;
   }
   if (!meaningful(item.reason)) errors.push(`${key} needs a concrete reason`);
+  if (item.disposition === 'DELEGATED' && !DELEGATED_TARGETS.includes(target)) {
+    errors.push(`${key} cannot be DELEGATED: this repository owns the ${target} target`);
+  }
   if (item.docsImpact === null || !DOCS_IMPACTS.includes(item.docsImpact)) {
     errors.push(`${key} must classify documentation impact`);
   } else if (item.docsImpact === 'update' && item.docs.length === 0) {

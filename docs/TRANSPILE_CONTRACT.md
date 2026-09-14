@@ -47,6 +47,7 @@ Every meaningful in-scope upstream change reviewed during a pin advance gets exa
 | `DEVIATION` | The area is relevant to this transpilation, but target behavior intentionally differs. Reference a `DEV-*` policy ID. |
 | `EXCLUDED` | The upstream subsystem is outside this transpilation's declared scope. Reference an `EXC-*` policy ID. |
 | `DEFERRED` | In scope, but intentionally not implemented yet. Record the compatibility consequence and tracking item. |
+| `DELEGATED` | The unit belongs to a target this repository does not own (the `server` target, reviewed in `smolpaws/smolpaws/packages/openhands-agent-server`). The decision is recorded there, not here. Only valid for non-owned targets. |
 
 `DEVIATION` and `EXCLUDED` are both departures from upstream in ordinary language. We distinguish them because maintenance differs: upstream changes under a `DEVIATION` must still be reviewed against our alternative behavior; changes wholly within an `EXCLUDED` subsystem do not create port work unless scope changes.
 
@@ -81,6 +82,10 @@ Product/REST callers select an `LLMProfile`; they do not configure a Python-styl
 ### DEV-SDK-005 — no ACP runtime execution
 
 ACP execution/model-switching runtime behavior is not part of this transpilation.
+
+### DEV-SDK-006 — exec-based terminal executor
+
+The Python terminal tool runs commands in a persistent tmux/subprocess session: it supports interactive input, returns to the model after 30 seconds without output while the process keeps running (soft timeout, exit code -1), and lets a later call continue or stop it. The TypeScript executor runs each command with Node's `exec`: no interactive input, no persistent session, and a **hard** default timeout (300 seconds unless the action sets `timeout`; `timeout: 0` means no limit) after which the process is killed and the observation reports `timeout: true` with exit code -1. Upstream changes to the terminal tool's soft-timeout, session, or input semantics must still be reviewed against this alternative.
 
 ### EXC-SDK-001 — plugin runtime
 
@@ -140,7 +145,7 @@ Generate commits/PRs, changed/added/deleted in-scope files, changed tests, chang
 
 ### 2. Classify before coding
 
-Assign each generated review unit one disposition above. `NO_TARGET_CHANGE` needs a concrete reason. `DEVIATION`/`EXCLUDED` reference stable policy IDs. `DEFERRED` records the upstream change, affected contract, reason, tracking item, compatibility consequence, and revisit trigger. Documentation impact must also be classified.
+Assign each generated review unit one disposition above. `server` units are `DELEGATED`: their real disposition lives in the server package's review record. `NO_TARGET_CHANGE` needs a concrete reason. `DEVIATION`/`EXCLUDED` reference stable policy IDs. `DEFERRED` records the upstream change, affected contract, reason, tracking item, compatibility consequence, and revisit trigger. Documentation impact must also be classified.
 
 ### 3. Port red/green
 

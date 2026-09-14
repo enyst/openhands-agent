@@ -86,7 +86,7 @@ npm run drift:scan -- \
 - explicitly ignored repository paths;
 - unmapped paths requiring explanation or a manifest change.
 
-`scan` is factual. It never assigns `PORT`, `NO_TARGET_CHANGE`, `DEVIATION`, `EXCLUDED`, or `DEFERRED`.
+`scan` is factual. It never assigns `PORT`, `NO_TARGET_CHANGE`, `DEVIATION`, `EXCLUDED`, `DEFERRED`, or `DELEGATED`.
 
 ### Prepare a bounded review
 
@@ -148,6 +148,7 @@ Both phases regenerate the interval from git and verify that:
 - no stale/unknown annotation remains;
 - every unmapped path has an explanation;
 - `NO_TARGET_CHANGE` has a concrete reason;
+- `DELEGATED` is used only for targets this repository does not own (`server`);
 - `DEVIATION` and `EXCLUDED` use a known policy for the correct target;
 - `EXCLUDED` covers every changed file in that unit, preventing mixed commits from being filtered wholesale;
 - `DEFERRED` has tracking, a compatibility consequence, and a revisit trigger;
@@ -162,6 +163,7 @@ Review dispositions respond to upstream changes:
 
 - `PORT`
 - `NO_TARGET_CHANGE`
+- `DELEGATED` (server units; decided in the server package's review record)
 - `DEVIATION`
 - `EXCLUDED`
 - `DEFERRED`

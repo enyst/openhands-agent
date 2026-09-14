@@ -55,7 +55,7 @@ export function renderMarkdown(inventory: DriftInventory, review?: DriftReview):
       const key = item.disposition ?? 'UNREVIEWED';
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    for (const key of ['PORT', 'NO_TARGET_CHANGE', 'DEVIATION', 'EXCLUDED', 'DEFERRED', 'UNREVIEWED']) {
+    for (const key of ['PORT', 'NO_TARGET_CHANGE', 'DEVIATION', 'EXCLUDED', 'DEFERRED', 'DELEGATED', 'UNREVIEWED']) {
       lines.push(`- **${key}:** ${counts.get(key) ?? 0}`);
     }
     lines.push('');
