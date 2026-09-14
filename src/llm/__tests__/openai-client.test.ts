@@ -141,6 +141,29 @@ describe('profile-resolved OpenAI-compatible chat client', () => {
     expect(result.message.tool_calls?.[0]).not.toHaveProperty('index');
   });
 
+  it.each([
+    { label: 'missing tool-call id', toolCall: { type: 'function', function: { name: 'grep', arguments: '{}' } } },
+    { label: 'missing function name', toolCall: { id: 'call_1', type: 'function', function: { arguments: '{}' } } },
+    { label: 'non-string arguments', toolCall: { id: 'call_1', type: 'function', function: { name: 'grep', arguments: {} } } },
+  ])('still rejects $label when provider extras are present', async ({ toolCall }) => {
+    const profile = llmProfileSchema.parse({ profileId: 'default', providerId: 'openai', model: 'gpt-4.1' });
+    const fetchImpl = async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ ...toolCall, index: 0 }] } }],
+        };
+      },
+      async text() {
+        return JSON.stringify(await this.json());
+      },
+    });
+    const client = new OpenAIChatClient(profile, 'openai-key', fetchImpl);
+
+    await expect(client.complete([{ role: 'user', content: [textContent('go')] }])).rejects.toThrow();
+  });
+
   it('posts OpenAI Responses requests and parses response output text', async () => {
     const profile = llmProfileSchema.parse({
       profileId: 'responses',

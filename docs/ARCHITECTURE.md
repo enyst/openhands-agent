@@ -106,6 +106,8 @@ The neutral LLM model lives in `src/llm/index.ts`:
 - `MessageToolCall` captures tool call IDs, response-item IDs, function names, JSON arguments, and origin (`completion` or `responses`).
 - `reduceTextContent()` and `contentToString()` provide compatibility helpers.
 
+The SDK owns provider compatibility normally supplied by LiteLLM in Python. Protocol normalization belongs in these clients; shared capability decisions live in `src/llm/provider-quirks.ts`. The [LLM provider implementation guide](LLM_PROVIDERS.md) describes where to put fixes and how to test them without expanding the shared `LLMClient` interface.
+
 Provider clients live next to the neutral model:
 
 - `OpenAIChatClient` for chat completions and compatible proxies.
