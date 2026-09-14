@@ -48,6 +48,19 @@ describe('TerminalExecutor', () => {
     }
   });
 
+  it('treats an explicit timeout of 0 as no limit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'openhands-terminal-'));
+    try {
+      const result = await new TerminalExecutor({ workingDir: root, defaultTimeoutSeconds: 1 }).execute({ command: 'sleep 1.2 && echo finished', timeout: 0 });
+
+      expect(result.timeout).toBe(false);
+      expect(result.exit_code).toBe(0);
+      expect(result.text).toContain('finished');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('reports a missing working directory instead of an empty failure', async () => {
     const result = await new TerminalExecutor({ workingDir: join(tmpdir(), 'openhands-terminal-does-not-exist') }).execute({ command: 'pwd' });
 
