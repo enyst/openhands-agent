@@ -18,6 +18,7 @@ Copy counts from the validated interval record:
 - `DEVIATION`:
 - `EXCLUDED`:
 - `DEFERRED`:
+- `DELEGATED` (server units):
 
 Every `NO_TARGET_CHANGE` has a concrete reason. Every `DEVIATION`/`EXCLUDED` references a stable policy ID. Every `DEFERRED` has tracking, compatibility consequence, and revisit trigger.
 

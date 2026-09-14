@@ -123,6 +123,44 @@ test('review validation distinguishes review completeness from close evidence', 
   }
 });
 
+test('server units are pre-filled DELEGATED, must stay DELEGATED, and sdk units never can be', async () => {
+  const fixture = await createFixture();
+  try {
+    await put(fixture.path, 'openhands-agent-server/openhands/agent_server/api.py', 'api v2\n');
+    await put(fixture.path, 'openhands-sdk/conversation/base.py', 'base v2\n');
+    const changed = commit(fixture.path, 'feat: sdk and server change');
+    const manifest = manifestTemplate(fixture.pin);
+    const inventory = generateInventory(new GitRepository(fixture.path), manifest, changed);
+    const review = prepareReview(inventory);
+    const server = review.items[unitId(changed, 'server')];
+    const sdk = review.items[unitId(changed, 'sdk')];
+    assert.ok(server);
+    assert.ok(sdk);
+    // prepareReview already delegates the server unit; the SDK unit still needs a real decision.
+    assert.equal(server.disposition, 'DELEGATED');
+    assert.equal(sdk.disposition, null);
+    sdk.disposition = 'DELEGATED';
+    sdk.reason = 'Trying to punt an owned target.';
+    sdk.docsImpact = 'none';
+
+    const errors = validateReview(inventory, review, manifest, 'close');
+    assert.ok(errors.some((error) => error.includes(`${unitId(changed, 'sdk')} cannot be DELEGATED`)));
+    assert.ok(!errors.some((error) => error.includes(unitId(changed, 'server'))));
+
+    sdk.disposition = 'NO_TARGET_CHANGE';
+    sdk.reason = 'Formatting-only change with no behavioral effect.';
+    assert.deepEqual(validateReview(inventory, review, manifest, 'close'), []);
+
+    // A semantic server decision made here is rejected: it belongs in the server package's record.
+    server.disposition = 'NO_TARGET_CHANGE';
+    server.reason = 'Version bump only.';
+    const notDelegated = validateReview(inventory, review, manifest, 'close');
+    assert.ok(notDelegated.some((error) => error.includes(`${unitId(changed, 'server')} must be DELEGATED`)));
+  } finally {
+    await rm(fixture.path, { recursive: true, force: true });
+  }
+});
+
 test('EXCLUDED is accepted only when every changed file is inside the exclusion', async () => {
   const fixture = await createFixture();
   try {

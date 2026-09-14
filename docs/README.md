@@ -7,6 +7,7 @@ These documents describe `@smolpaws/openhands-agent`, the idiomatic TypeScript t
 - [`TRANSPILE_CONTRACT.md`](TRANSPILE_CONTRACT.md) — compatibility promise, scope, policy IDs, dispositions, and pin-advance rules.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current TypeScript component architecture and runtime boundaries.
 - [`DRIFT_TOOLING.md`](DRIFT_TOOLING.md) — design for the canonical pin, generated interval reports, weekly watcher, server OpenAPI oracle, and differential evidence.
+- [`DRIFT_AUTOMATION.md`](DRIFT_AUTOMATION.md) — the time-boxed, resumable runbook the weekly unattended pin-advance automation follows.
 
 ## Focused research
 
