@@ -136,6 +136,14 @@ Compatibility is judged by observable behavior through the SDK, including the be
 
 Keep protocol normalization in the owning provider client and reusable capability decisions in small, pure provider helpers. Do not spread provider switches into agents, conversations, tools, servers, or bridges. Accept harmless extra wire fields only where safe, keep required fields validated, and preserve metadata needed for tool/reasoning continuation. A quirk must have a regression test from upstream evidence or a sanitized provider request/response fixture; when no Python test exists, demonstrate the failure with that fixture before fixing it. See [LLM provider implementation](LLM_PROVIDERS.md) for placement and test guidance.
 
+### Subscription (OAuth) authentication — `DEFERRED`
+
+The Python SDK supports OpenAI ChatGPT-subscription access (Codex models) as a first-class auth path alongside API keys, in `openhands/sdk/llm/auth/` (`openai.py`, `credentials.py`): an OAuth `CredentialStore` at `~/.openhands/auth/` holding `access_token`/`refresh_token`/`expires_at`, token refresh via `grant_type=refresh_token`, expiry checks, JWT account-id extraction, and `is_subscription` request-option shaping.
+
+This TypeScript SDK currently ports only the **endpoint-aware half**: `isOpenAISubscriptionEndpoint()` (detecting `chatgpt.com/backend-api/codex`) plus sub-mode option shaping in `src/llm/provider-quirks.ts`, and `OpenAIResponsesClient` posting to `{baseUrl}/responses` with a static `Authorization: Bearer <apiKey>`. The **OAuth layer is not yet ported**: there is no credential store, no refresh, and no expiry handling.
+
+**Consequence:** a subscription profile can only carry a static token in its profile secret; it works until that token expires (~hours) and then fails, with no refresh. This feature is **in scope** and must be transpiled to reach parity — port `auth/openai.py` + `auth/credentials.py` tests-first, keeping the SDK's **own** store at `~/.openhands/auth/`. It must not read the Codex CLI's `~/.codex/auth.json`; that path belongs to a separate experiment (`tomcat`), not to this SDK, which owns its auth exactly as the Python SDK does. Tracked as bead `smolpaws-zlo.1`.
+
 ## Tests-first rule
 
 For every upstream behavior change that requires target work:
