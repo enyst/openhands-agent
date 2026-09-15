@@ -186,6 +186,8 @@ Workspaces in `src/workspace/` separate execution substrate from agent logic:
 
 `AgentContext` composes repository guidance, current time, and skills into prompt suffixes. Skills support static content and keyword triggers; activated skills can contribute user-message suffixes without changing the durable event protocol.
 
+Explicit non-AgentSkills skills with `trigger: null` include their complete body in `REPO_CONTEXT`; hosts can use this for durable instruction files. Automatic upstream memory-index loading (`load_memory` / `memory_context`) is a separate, deferred feature. See [context and memory evidence](../transpile/context-memory.md) for the current limits, persistence distinction, and tracking.
+
 Condensers operate on `View` objects. A condenser either returns a smaller `View` or a `Condensation` event. `PipelineCondenser` runs condensers in sequence and short-circuits when one emits a condensation.
 
 Hooks are lifecycle-sidecar processes. Hook results can allow/block and attach additional context. They are represented as hook execution results/events rather than as confirmation gates.

@@ -130,6 +130,12 @@ argument, allowing durable command deduplication. Ordinary tools retain their ex
 This opt-in belongs to EXT-SDK-001/002: it adds no fields to wire events, no scheduling/delivery engine,
 and no confirmation or queue semantics to the agent loop.
 
+## Context and persistent memory
+
+Preserve the existing always-on context path: a non-AgentSkills `Skill` with `trigger: null` contributes its full content to `AgentContext`'s `REPO_CONTEXT` block. A host may read its chosen instruction or memory files and supply those skills through the public constructor. Product-specific file selection belongs to the host; the SDK must not discover SmolPaws private paths implicitly. This uses an existing SDK contract and does not require a new extension or a larger `AgentLaunchAdditions.system_message_suffix_append` limit.
+
+Upstream's opt-in `load_memory` / `memory_context`, memory-index loader, settings propagation and initialization/restore behavior remain in scope. Absence of that implementation is a deferred parity gap, not evidence for `NO_TARGET_CHANGE` or an exclusion. Keep that separate from the supported explicit-skill path; supplying a memory file as a skill does not complete the native memory port. See the [current context and memory evidence](../transpile/context-memory.md) for the tracked gap and superseded historical classifications.
+
 ## LLM/provider rule
 
 Keep the shared `LLMClient` boundary thin. Provider clients own provider-specific request construction, tool serialization, continuation/replay, reasoning metadata, caching, and error mapping. Do not flatten provider semantics merely to make the abstraction look uniform.

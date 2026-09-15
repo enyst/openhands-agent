@@ -9,6 +9,7 @@ These documents describe `@smolpaws/openhands-agent`, the idiomatic TypeScript t
 - [`LLM_PROVIDERS.md`](LLM_PROVIDERS.md) — ownership, placement, and regression testing for direct-provider compatibility and quirks.
 - [`LLM_METRICS.md`](LLM_METRICS.md) — per-call accounting, accumulated totals, missing measurements and cost provenance.
 - [`Subscription port evidence`](../transpile/subscription-auth.md) — completed SDK/server OAuth support, superseded deferrals, and behavior future transpilation runs must preserve.
+- [`Context and memory evidence`](../transpile/context-memory.md) — supported full-content skills, host file ownership, and the deferred upstream memory-index loader.
 - [`DRIFT_TOOLING.md`](DRIFT_TOOLING.md) — design for the canonical pin, generated interval reports, weekly watcher, server OpenAPI oracle, and differential evidence.
 - [`DRIFT_AUTOMATION.md`](DRIFT_AUTOMATION.md) — the time-boxed, resumable runbook the weekly unattended pin-advance automation follows.
 
