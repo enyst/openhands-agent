@@ -176,9 +176,15 @@ export function buildChatCompletionsBody(
 ): Record<string, unknown> {
   const normalizedProfile = normalizeGenerationParamsForModel(profile);
   const sendReasoningContent = isReasoningModel(normalizedProfile);
+  // DeepSeek tool requests require this field on every historical assistant turn, including
+  // turns from non-thinking/foreign models. An empty value records absence, not invented thought.
+  const requireReasoningContent = tools.length > 0 && sendReasoningContent && normalizedProfile.model.toLowerCase().includes('deepseek');
+  const history = messages.map((message) => messageSchema.parse(message)).map((message) =>
+    requireReasoningContent && message.role === 'assistant' && message.reasoning_content === null
+      ? { ...message, reasoning_content: '' } : message);
   const body: Record<string, unknown> = {
     model: normalizedProfile.model,
-    messages: prepareAnthropicPromptCaching(normalizedProfile, orderCompletedToolResults(messages.map((message) => messageSchema.parse(message)))).map((message) => toOpenAIChatMessage(message, sendReasoningContent)),
+    messages: prepareAnthropicPromptCaching(normalizedProfile, orderCompletedToolResults(history)).map((message) => toOpenAIChatMessage(message, sendReasoningContent)),
   };
   if (tools.length > 0) {
     body.tools = tools.map(toOpenAIChatTool);

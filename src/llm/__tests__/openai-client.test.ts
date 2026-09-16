@@ -453,6 +453,45 @@ describe('OpenAI chat message serialization parity', () => {
     expect((body.messages as Array<Record<string, unknown>>)[0]).not.toHaveProperty('reasoning_content');
   });
 
+  it('fills absent foreign assistant reasoning for DeepSeek tool requests without changing existing reasoning or history', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'flash', providerId: 'deepseek', model: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com' });
+    // A Haiku completion has no reasoning_content. After switch_llm it is still part of the
+    // completed tool exchange that the newly selected DeepSeek must receive.
+    const history = [
+      { role: 'assistant', content: [textContent('old DeepSeek answer')], reasoning_content: 'original reasoning' },
+      { role: 'assistant', content: [textContent('Haiku answer')] },
+      { role: 'assistant', content: [textContent('')], tool_calls: [{ id: 'switch-1', name: 'switch_llm',
+        arguments: '{"profile_name":"flash","reason":"continue"}', origin: 'completion' }] },
+      { role: 'tool', tool_call_id: 'switch-1', name: 'switch_llm', content: [textContent('Accepted profile flash')] },
+    ];
+    const saved = structuredClone(history);
+    const tool = new ToolDefinition({ name: 'finish', description: 'Finish', inputSchema: z.object({}), executor: () => ({}) });
+    const body = buildChatCompletionsBody(profile, history, [tool]);
+    const messages = body.messages as Array<Record<string, unknown>>;
+    expect(messages[0]?.reasoning_content).toBe('original reasoning');
+    expect(messages[1]?.reasoning_content).toBe('');
+    expect(messages[2]?.reasoning_content).toBe('');
+    expect(messages[2]?.tool_calls).toEqual([{ id: 'switch-1', type: 'function', function: {
+      name: 'switch_llm', arguments: '{"profile_name":"flash","reason":"continue"}',
+    } }]);
+    expect(messages[3]).toMatchObject({ role: 'tool', tool_call_id: 'switch-1', content: 'Accepted profile flash' });
+    expect(messages[3]).not.toHaveProperty('reasoning_content');
+    expect(history).toEqual(saved);
+  });
+
+  it.each(['gpt-5', 'kimi-k2-thinking', 'deepseek-chat'])('does not invent empty reasoning for unrelated model %s', (model) => {
+    const profile = llmProfileSchema.parse({ profileId: 'other', providerId: 'openai', model });
+    const tool = new ToolDefinition({ name: 'finish', description: 'Finish', inputSchema: z.object({}), executor: () => ({}) });
+    const body = buildChatCompletionsBody(profile, [{ role: 'assistant', content: [textContent('answer')] }], [tool]);
+    expect((body.messages as Array<Record<string, unknown>>)[0]).not.toHaveProperty('reasoning_content');
+  });
+
+  it('keeps missing reasoning omitted for DeepSeek requests without tools', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'flash', providerId: 'deepseek', model: 'deepseek-v4-flash' });
+    const body = buildChatCompletionsBody(profile, [{ role: 'assistant', content: [textContent('answer')] }]);
+    expect((body.messages as Array<Record<string, unknown>>)[0]).not.toHaveProperty('reasoning_content');
+  });
+
   it('echoes reasoning_content regardless of a provider-qualified model id', () => {
     const profile = llmProfileSchema.parse({
       profileId: 'flash',
