@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { AnthropicMessagesClient } from '../anthropic.js';
 import { GeminiClient } from '../gemini.js';
@@ -19,6 +20,38 @@ const chatResponse = (usage?: unknown) => ({
 });
 
 describe('provider-reported usage normalization', () => {
+  it('retains the eval proxy Anthropic raw usage and its explicit zero cache writes', async () => {
+    // Actual September 16 Fable proxy usage; no chat content or credentials.
+    const usage = JSON.parse(readFileSync(new URL('./fixtures/anthropic-proxy-usage.json', import.meta.url), 'utf8')) as unknown;
+    const proxy = llmProfileSchema.parse({ profileId: 'proxy', providerId: 'litellm_proxy', model: 'anthropic/claude-fable-5-1' });
+    const result = await new OpenAIChatClient(proxy, 'test', fetchResponse(chatResponse(usage))).complete(messages);
+    expect(result.usage).toEqual({ promptTokens: 113622, completionTokens: 1224, totalTokens: 114846,
+      cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, providerUsage: usage });
+  });
+
+  it.each([
+    { cache_read_input_tokens: 80, cache_creation_input_tokens: 10 },
+    { prompt_tokens_details: { cached_tokens: 80, cache_creation_tokens: 10 } },
+    { cache_read_input_tokens: 80, cache_creation_input_tokens: 10, prompt_tokens_details: { cached_tokens: 80, cache_creation_tokens: 10 } },
+  ])('normalizes Anthropic Chat cache aliases without adding them to inclusive prompt tokens: %j', async cache => {
+    const usage = { prompt_tokens: 100, completion_tokens: 3, total_tokens: 103, ...cache };
+    const proxy = llmProfileSchema.parse({ profileId: 'proxy', providerId: 'litellm_proxy', model: 'anthropic/claude-haiku-4-5' });
+    const result = await new OpenAIChatClient(proxy, 'test', fetchResponse(chatResponse(usage))).complete(messages);
+    expect(result.usage).toEqual({ promptTokens: 100, completionTokens: 3, totalTokens: 103,
+      cacheReadTokens: 80, cacheWriteTokens: 10, providerUsage: usage });
+  });
+
+  it('keeps nullable proxy cache counters unknown and does not interpret Anthropic aliases for other models', async () => {
+    const proxy = llmProfileSchema.parse({ profileId: 'proxy', providerId: 'litellm_proxy', model: 'anthropic/claude-haiku-4-5' });
+    const usage = { prompt_tokens: 10, cache_read_input_tokens: null, cache_creation_input_tokens: null,
+      prompt_tokens_details: { cache_creation_tokens: null } };
+    const result = await new OpenAIChatClient(proxy, 'test', fetchResponse(chatResponse(usage))).complete(messages);
+    expect(result.usage).toEqual({ promptTokens: 10, providerUsage: usage });
+    const unrelated = { prompt_tokens: 10, cache_read_input_tokens: 5, cache_creation_input_tokens: 3 };
+    const other = await new OpenAIChatClient(profile('openai'), 'test', fetchResponse(chatResponse(unrelated))).complete(messages);
+    expect(other.usage).toEqual({ promptTokens: 10, providerUsage: unrelated });
+  });
+
   it('preserves DeepSeek hit/miss counters without double-counting their aliases', async () => {
     const usage = {
       prompt_tokens: 100, completion_tokens: 30, total_tokens: 130,

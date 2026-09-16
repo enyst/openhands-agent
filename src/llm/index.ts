@@ -30,6 +30,7 @@ export const llmProfileSchema = z
     timeoutSeconds: z.number().positive().nullable().default(null),
     reasoningEffort: reasoningEffortSchema.nullable().default(null),
     reasoningSummary: reasoningSummarySchema.nullable().default(null),
+    cachingPrompt: z.boolean().default(true),
     promptCacheRetention: promptCacheRetentionSchema.nullable().default(null),
     promptCacheKey: z.string().min(1).nullable().default(null),
     headers: z.record(z.string(), z.string()).default({}),

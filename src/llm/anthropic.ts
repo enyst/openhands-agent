@@ -6,8 +6,9 @@ import type { SecretStore } from '../secrets/index.js';
 import type { ToolDefinition } from '../tool/index.js';
 import { llmCompletionResponseSchema, llmResponseMetadataSchema, parseLlmResponseWithMetadata, type FetchLike, type LLMClient, type LLMCompletionResponse, type LLMResponseMetadata } from './client.js';
 import { isContentPolicyViolation, LLMContentPolicyViolationError } from './exceptions.js';
-import { contentToString, messageSchema, reduceTextContent, type Content, type LLMProfile, type Message, type MessageToolCall } from './index.js';
-import { getAnthropicThinkingBudget, normalizeGenerationParamsForModel, supportsPromptCaching } from './provider-quirks.js';
+import { messageSchema, reduceTextContent, type Content, type LLMProfile, type Message, type MessageToolCall } from './index.js';
+import { getAnthropicThinkingBudget, normalizeGenerationParamsForModel } from './provider-quirks.js';
+import { ANTHROPIC_CACHE_CONTROL, prepareAnthropicPromptCaching, validateAnthropicCacheBreakpoints } from './anthropic-prompt-cache.js';
 
 export { llmProfileSchema } from './index.js';
 export type { LLMProfile } from './index.js';
@@ -75,24 +76,20 @@ export async function createAnthropicClientFromProfile(
 
 export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readonly Message[], tools?: readonly ToolDefinition[]): Record<string, unknown> {
   const normalizedProfile = normalizeGenerationParamsForModel(profile);
-  const parsedMessages = orderCompletedToolResults(messages.map((message) => messageSchema.parse(message)));
+  const parsedMessages = prepareAnthropicPromptCaching(normalizedProfile, orderCompletedToolResults(messages.map((message) => messageSchema.parse(message))));
   const systemMessages = parsedMessages.filter((message) => message.role === 'system');
-  const system = systemMessages.flatMap((message) => contentToString(message.content));
-  const shouldCacheSystem = supportsPromptCaching(normalizedProfile) && systemMessages.some((message) => message.content.some((content) => content.cache_prompt));
+  const system = systemMessages.flatMap((message) => message.content.flatMap(toAnthropicContentBlocks));
   const maxTokens = normalizedProfile.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
   const thinkingBudget = getAnthropicThinkingBudget(normalizedProfile, maxTokens);
   const body: Record<string, unknown> = {
     model: normalizedProfile.model,
     max_tokens: maxTokens,
     messages: toAnthropicMessages(
-      normalizedProfile,
       parsedMessages.filter((message) => message.role !== 'system'),
     ),
   };
   if (system.length > 0) {
-    body.system = shouldCacheSystem
-      ? [{ type: 'text', text: system.join('\n'), cache_control: { type: 'ephemeral' } }]
-      : system.join('\n');
+    body.system = system;
   }
   if (tools && tools.length > 0) {
     body.tools = tools.map(toAnthropicTool);
@@ -110,6 +107,7 @@ export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readon
   if (thinkingBudget !== undefined) {
     body.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
   }
+  validateAnthropicCacheBreakpoints(body);
   return body;
 }
 
@@ -122,11 +120,11 @@ function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
   };
 }
 
-function toAnthropicMessages(profile: LLMProfile, messages: readonly Message[]): readonly Record<string, unknown>[] {
+function toAnthropicMessages(messages: readonly Message[]): readonly Record<string, unknown>[] {
   const result: Record<string, unknown>[] = [];
   for (const message of messages) {
     if (message.role !== 'tool') {
-      result.push(toAnthropicMessage(profile, message));
+      result.push(toAnthropicMessage(message));
       continue;
     }
 
@@ -141,7 +139,7 @@ function toAnthropicMessages(profile: LLMProfile, messages: readonly Message[]):
   return result;
 }
 
-function toAnthropicMessage(profile: LLMProfile, message: Message): Record<string, unknown> {
+function toAnthropicMessage(message: Message): Record<string, unknown> {
   if (message.role === 'assistant') {
     return { role: 'assistant', content: toAnthropicAssistantContent(message) };
   }
@@ -150,7 +148,7 @@ function toAnthropicMessage(profile: LLMProfile, message: Message): Record<strin
   }
   return {
     role: 'user',
-    content: message.content.map((content) => toAnthropicContentBlock(profile, content)),
+    content: message.content.flatMap(toAnthropicContentBlocks),
   };
 }
 
@@ -164,10 +162,7 @@ function toAnthropicAssistantContent(message: Message): readonly Record<string, 
     }
   }
 
-  const text = reduceTextContent(message);
-  if (text.length > 0) {
-    blocks.push({ type: 'text', text });
-  }
+  blocks.push(...message.content.filter(content => content.type !== 'text' || content.text.length > 0).flatMap(toAnthropicContentBlocks));
   if (message.tool_calls !== null) {
     blocks.push(...message.tool_calls.map(toAnthropicToolUseBlock));
   }
@@ -190,24 +185,20 @@ function toAnthropicToolResultBlock(message: Message): Record<string, unknown> {
   return {
     type: 'tool_result',
     tool_use_id: message.tool_call_id,
-    content: reduceTextContent(message),
+    content: message.content.every(content => content.type === 'text')
+      ? reduceTextContent(message)
+      : message.content.flatMap(content => toAnthropicContentBlocks({ ...content, cache_prompt: false })),
+    ...(message.content.some(content => content.cache_prompt) ? { cache_control: ANTHROPIC_CACHE_CONTROL } : {}),
   };
 }
 
-function toAnthropicContentBlock(profile: LLMProfile, content: Content): Record<string, unknown> {
-  const block: Record<string, unknown> = content.type === 'text'
-    ? { type: 'text', text: content.text }
-    : {
-        type: 'image',
-        source: {
-          type: 'url',
-          url: content.image_urls[0] ?? '',
-        },
-      };
-  if (content.cache_prompt && supportsPromptCaching(profile)) {
-    block.cache_control = { type: 'ephemeral' };
-  }
-  return block;
+function toAnthropicContentBlocks(content: Content): Record<string, unknown>[] {
+  const blocks: Record<string, unknown>[] = content.type === 'text'
+    ? [{ type: 'text', text: content.text }]
+    : content.image_urls.map(url => ({ type: 'image', source: { type: 'url', url } }));
+  const last = blocks.at(-1);
+  if (last && content.cache_prompt) last.cache_control = ANTHROPIC_CACHE_CONTROL;
+  return blocks;
 }
 
 function parseToolArguments(toolCall: MessageToolCall): Record<string, unknown> {

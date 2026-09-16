@@ -13,7 +13,7 @@ import type { AgentContext } from '../context/index.js';
 import { LLMResponseError, type LLMClient } from '../llm/client.js';
 import { createLlmUsageEvent } from '../llm/metrics.js';
 import { isContentPolicyViolation } from '../llm/exceptions.js';
-import { textContent, type Message } from '../llm/index.js';
+import { textContent, type Message, type TextContent } from '../llm/index.js';
 import type { ToolDefinition } from '../tool/index.js';
 import { ConversationState } from '../conversation/state.js';
 import { dispatchLlmResponse } from './response-dispatch.js';
@@ -106,12 +106,11 @@ export class Agent {
     return messages;
   }
 
-  private renderSystemPrompt(): string | null {
+  private renderSystemPrompt(): TextContent[] | null {
     const suffix = this.context?.getSystemMessageSuffix() ?? null;
-    if (this.systemPrompt !== null && suffix !== null) {
-      return `${this.systemPrompt}\n\n${suffix}`;
-    }
-    return this.systemPrompt ?? suffix;
+    // Preserve the static/dynamic boundary for provider prompt caching.
+    const blocks = [this.systemPrompt, suffix].filter((text): text is string => text !== null).map(text => textContent(text));
+    return blocks.length > 0 ? blocks : null;
   }
 
 
@@ -154,10 +153,10 @@ function isLlmConvertibleEvent(event: Event): event is LLMConvertibleEvent {
   );
 }
 
-function systemMessage(text: string): Message {
+function systemMessage(content: TextContent[]): Message {
   return {
     role: 'system',
-    content: [textContent(text)],
+    content,
     tool_calls: null,
     tool_call_id: null,
     name: null,

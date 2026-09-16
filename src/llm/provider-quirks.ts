@@ -19,6 +19,8 @@ const PROMPT_CACHE_MODELS = [
   'claude-opus-4-6',
   'claude-opus-4-7',
   'claude-sonnet-5',
+  'claude-opus-5',
+  'claude-fable-5',
 ] as const;
 
 export function isGpt5Model(model: string | null | undefined): boolean {
