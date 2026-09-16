@@ -7,6 +7,7 @@ import type { Agent } from '../agent/index.js';
 import { EventLog, EVENTS_DIR } from './event-log.js';
 import { ConversationState, conversationExecutionStatus } from './state.js';
 import { StuckDetector, type StuckDetectionThresholds } from './stuck-detector.js';
+import { applyAgentStepBoundary, type AgentStepBoundary } from './ext/step-boundary.js';
 
 export interface LocalConversationOptions {
   readonly agent: Agent;
@@ -16,17 +17,27 @@ export interface LocalConversationOptions {
   readonly conversationId?: string;
   readonly conversationsDir?: string;
   readonly fileStore?: FileStore;
+  /** Runs before the first step and after each fully persisted step, including finish. */
+  readonly onStepBoundary?: AgentStepBoundary;
 }
 
 export class LocalConversation {
-  readonly agent: Agent;
+  private activeAgent: Agent;
+  private readonly onStepBoundary: AgentStepBoundary | undefined;
+  private runInProgress: Promise<void> | null = null;
+  private stepUserMessageId: string | null = null;
+
+  get agent(): Agent { return this.activeAgent; }
+  /** Last user event included when an agent step began; later arrivals remain queued. */
+  get lastStepUserMessageId(): string | null { return this.stepUserMessageId; }
   readonly state: ConversationState;
   readonly maxIterations: number;
   readonly stuckDetector: StuckDetector | null;
   readonly conversationId: string | null;
 
   constructor(options: LocalConversationOptions) {
-    this.agent = options.agent;
+    this.activeAgent = options.agent;
+    this.onStepBoundary = options.onStepBoundary;
     this.conversationId = options.conversationId ?? (options.state === undefined && hasPersistentStore(options) ? randomUUID() : null);
     this.state = options.state ?? createConversationState(options, this.conversationId);
     this.maxIterations = options.maxIterations ?? 500;
@@ -58,6 +69,17 @@ export class LocalConversation {
   }
 
   async run(): Promise<void> {
+    if (this.runInProgress !== null) return this.runInProgress;
+    const run = this.runOnce();
+    this.runInProgress = run;
+    try {
+      await run;
+    } finally {
+      this.runInProgress = null;
+    }
+  }
+
+  private async runOnce(): Promise<void> {
     if (this.state.executionStatus === conversationExecutionStatus.PAUSED) {
       return;
     }
@@ -70,20 +92,21 @@ export class LocalConversation {
     }
 
     let iteration = 0;
+    if (this.state.executionStatus === conversationExecutionStatus.RUNNING) {
+      this.activeAgent = await applyAgentStepBoundary(this.agent, this.state, this.onStepBoundary);
+    }
     while (this.state.executionStatus === conversationExecutionStatus.RUNNING) {
       if (this.stuckDetector !== null && this.checkStuckOrNudge()) {
         return;
       }
 
+      this.stepUserMessageId = latestUserMessageId(this.state.events);
       const emitted = await this.agent.step(this.state);
       iteration += 1;
 
       if (emitted.some(isSuccessfulFinishObservation)) {
         this.state.executionStatus = conversationExecutionStatus.FINISHED;
-        return;
-      }
-
-      if (iteration >= this.maxIterations) {
+      } else if (iteration >= this.maxIterations && this.state.executionStatus === conversationExecutionStatus.RUNNING) {
         this.state.executionStatus = conversationExecutionStatus.ERROR;
         await this.state.appendEventAsync(
           conversationErrorEventSchema.parse({
@@ -92,8 +115,8 @@ export class LocalConversation {
             detail: `Agent reached maximum iterations limit (${this.maxIterations}).`,
           }),
         );
-        return;
       }
+      this.activeAgent = await applyAgentStepBoundary(this.agent, this.state, this.onStepBoundary);
     }
   }
 
@@ -180,4 +203,12 @@ function isSuccessfulFinishObservation(event: Event): boolean {
   }
   const isError = event.observation.is_error;
   return isError !== true;
+}
+
+function latestUserMessageId(events: readonly Event[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind === 'MessageEvent' && event.source === 'user') return event.id;
+  }
+  return null;
 }

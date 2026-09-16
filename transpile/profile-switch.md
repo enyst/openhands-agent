@@ -1,0 +1,45 @@
+# Saved-profile switching evidence
+
+This bounded port uses the current manifest pin, `50080b58d35b4824fda25fca2345d80bcd08aeff`, without advancing it. The builtin is **PORT**, adapted to the existing profile-first host boundary under DEV-SDK-004. The host step-boundary callback is the separately named EXT-SDK-003.
+
+## Pinned sources and tests
+
+- `openhands-sdk/openhands/sdk/tool/builtins/switch_llm.py`: saved profile names, action fields `profile_name`/`reason`, optional builtin, structured observation and error behavior.
+- `openhands-sdk/openhands/sdk/settings/model.py`: `enable_switch_llm_tool` defaults true and controls optional tool inclusion even with an empty profile store.
+- `tests/sdk/tool/test_switch_llm.py`: sorted names, successful model/reason, missing profile, unexpected resolver failure, enabled/disabled and empty-store behavior.
+- `tests/sdk/conversation/test_switch_model.py`: next-call switching, custom profile storage, state agreement, profile changes, and switch plus finish in a single response without deadlock (#3485).
+- `tests/agent_server/test_switch_llm_survives_reload.py`: host persistence evidence to be adapted in the separately maintained server package.
+
+## Target boundary
+
+`SwitchLLMTool.create({ profileNames, switchProfile })` accepts names and a runtime callback. Its action uses the existing TypeScript tool-input convention without Python's internal action discriminator. Its observation preserves the Python `kind`, `content`, `is_error`, `profile_name`, `reason`, and `active_model` fields. Both empty stores and absent runtime bindings have explicit descriptions/errors. Saved names are descriptive, not a hard-coded model enum.
+
+The callback returns the selected model only after resolving and accepting the profile. Hosts may durably queue selection until `LocalConversation.onStepBoundary` after all tools in the current response have completed. Success therefore says the profile is accepted for the next LLM call. The host must preserve the old working binding on failed preparation, persist activation before returning a replacement agent, and restore accepted pending selections after restart. The SDK does not provide a singleton profile store or the Python mutable `LLMRegistry`; per-completion native accounting remains DEV-SDK-007. It does not inherit Python's first-write-wins `usage_id` client cache, which can silently discard a replacement model (SmolPaws `smolpaws-5wr`).
+
+No condenser, title, oracle, or ask-agent model is implicitly changed. Native LLM condenser/ask-agent ports are not completed by this work. Settings-to-agent wiring and durable profile restoration are verified by the host package, because the SDK settings schemas alone do not construct an agent.
+
+## Superseded historical interpretation
+
+The frozen `d1595f72c..2eff609f` review classified `5f208d65f8d932ed8b699ddff6df12492d6c84f3:sdk` as `NO_TARGET_CHANGE` because TypeScript lacked the ask-agent registry-refresh path, noting only an `enable_switch_llm_tool` flag. That historical note did not establish that switching was implemented or excluded. At this pin the actual builtin and switching integration were missing, an in-scope gap. This port supplies the builtin and host integration seam; ask-agent refresh remains unimplemented. Frozen interval files are unchanged.
+
+## Deterministic evidence
+
+`src/tool/__tests__/switch-llm.test.ts` adapts the pinned tool tests. `src/conversation/__tests__/step-boundary.test.ts` verifies initial selection, durable parallel-tool completion, coalesced concurrent runs, same-response switch/finish, preserved run budget/state, non-running no-ops, and rejection propagation. Initial execution before implementation produced **10 expected failures and one existing-behavior pass**: no exported switch tool/resolver or boundary hook existed. A subsequent concurrency regression failed because a second `run()` invoked the boundary while two tool actions were still pending; coalescing active runs makes that test pass.
+
+The adjacent queue-coordination regression verifies that `lastStepUserMessageId` includes arrivals during asynchronous preparation but excludes input queued after the final step. The marker is sampled synchronously before `Agent.step`; it is a target host-coordination feature, not part of the upstream switch source. Terminal status is visible before final-step preparation, including finish-tool responses.
+
+The hook snapshots legacy history origin before host activation. Cross-profile opaque-history filtering is covered separately by the 18 tests in `src/agent/__tests__/profile-history.test.ts`, including native Anthropic/Gemini/OpenAI serialization, restoration, switch-back, reused response IDs, and known/unknown legacy origins. Independent review added the actual parser shape for reasoning-only turns (`content: ''`, normalized into an empty text block), whitespace, retained images, and visible extended content. The empty-text and whitespace regressions failed before the projection was corrected. Pinned Python `llm.py` only explicitly strips Responses reasoning on the subscription path; DEV-SDK-008 records the broader target projection rather than claiming parity. The digest excludes secrets, headers, URL userinfo, and query values; same-profile edits limited to those excluded values are outside its detectable identity. Historical events and accounting records are never rewritten.
+
+Final local SDK evidence: **577 tests passed, one existing remote-workspace integration skip**; seven drift-tool tests, SDK/drift/example typechecks, lint, bundle/declaration build, and deterministic examples passed. Socket-using test fixtures and the `tsx` example runner require local socket permission; a sandbox-only run reported those permission failures before the successful unrestricted-local test run. These deterministic checks do not establish external-provider viability.
+
+## Cross-provider continuation finding
+
+An isolated September 16, 2026 host smoke moved a conversation from DeepSeek v4 Flash to Claude Haiku, retained a synthetic context marker, and accepted a real `switch_llm` call back to DeepSeek. The next provider request failed because the intervening Haiku assistant tool call had no exposed `reasoning_content`. A bounded diagnostic classified the provider failure as invalid reasoning; it did not indicate an authentication, rate-limit, or signature rejection. No raw error body or credential is included in this evidence.
+
+The [DeepSeek tool guide](https://api-docs.deepseek.com/guides/thinking_mode/#tool-calls) requires reasoning content for historical assistant turns in requests with tools, while the [request schema](https://api-docs.deepseek.com/api/create-chat-completion/) permits an empty string. The narrow correction belongs in the Chat Completions provider serializer: preserve recorded reasoning, and represent absent DeepSeek historical reasoning as an empty field. This provider compatibility work does not advance the Python pin or create a new deviation; the SDK owns compatibility normally supplied through upstream provider dependencies. It must not strip history, disable thinking, or change profile credentials to make the continuation work.
+
+The foreign-history provider regression failed before the correction. Five added tests verify empty fallback on tool and ordinary assistant turns, exact preservation of existing reasoning and completed tool exchanges, unchanged source messages, and omission for unrelated models or requests without tools. The OpenAI/history focused suites passed 54 tests; the final full SDK suite passed 577 tests with the existing remote-workspace skip.
+
+With the correction, the same isolated conversation completed the DeepSeek continuation through the saved Haiku tool exchange and recalled its original synthetic marker. A fresh server instance then loaded the same persistence directory, retained the tool-selected DeepSeek profile despite the unchanged Haiku configuration, and recalled the marker again. Reported serving models were `deepseek-flash` and `anthropic/claude-haiku-4-5-20251001`; selection was checked against returned provider metadata and usage records rather than the agent's self-description.
+
+The bounded smoke used seven of ten permitted requests: five successful completions plus the two pre-fix failures (one diagnostic). Prior event and context hashes stayed unchanged; restart itself made no model call and preserved exact metrics. Five distinct usage records accounted for 12,623 tokens. Known calculated DeepSeek cost totaled USD 0.0011991; Haiku cost was unavailable, so this is not a total bill. Cache reads were zero, and no caching efficacy is claimed. This live result verifies the exercised provider/host path, not general Python parity or every model combination.

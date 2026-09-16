@@ -163,6 +163,10 @@ The supported model is:
 
 This package deliberately does not pick a global on-disk LLM profile database or config path. `LLMProfile` is a zod-validated data contract, not a singleton local registry. A product such as Agent Canvas or OpenHands Tab may store profile JSON wherever its settings system lives, then provide the selected profile to `createClientFromProfile()`. Examples use `InMemorySecretStore` and construct profiles in process.
 
+`SwitchLLMTool.create({ profileNames, switchProfile })` exposes the optional saved-profile tool. Hosts resolve names, build the replacement client, and durably accept the selection in `switchProfile`; a pending selection can activate through `LocalConversation.onStepBoundary` before the next model call. The boundary runs before the first step and after complete persisted tool batches, including a final finish. Returning an `Agent` replaces only the active agent; the same conversation state and run budget continue. Concurrent `run()` callers share one run. The read-only `lastStepUserMessageId` tells hosts which user event the latest step actually saw, so later queued input can be handled separately.
+
+Accounting records retain a non-secret profile-origin digest. Before a host callback may change the binding, the conversation anchors legacy history to the original binding. `Agent.step` projects outgoing history for the current profile: foreign signed/encrypted reasoning is removed while visible text, tools, plaintext reasoning, stored events, and metrics remain intact. See DEV-SDK-008 for the conservative legacy rules and excluded credential/header/query identity fields; this is broader than pinned Python's subscription-only Responses filtering.
+
 Raw API keys are separate from profile JSON. With `MacOSKeychainSecretStore`, values live in macOS Keychain generic-password items under service `openhands` and accounts such as `llm-provider:openai`, `llm-provider:gemini`, `llm-provider:anthropic`, or `llm-profile:<profileId>:api-key`. This intentionally replaces Python's `SecretRegistry`/Cipher/storage split with the current `SecretStore` and keyring-oriented surface.
 
 ## Tools and workspaces

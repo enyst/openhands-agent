@@ -32,6 +32,12 @@ Some provider fields are semantically necessary: reasoning content, signed think
 
 Usage needs the same care. Preserve missing versus zero counters, retain `providerUsage`, and normalize inclusive input/output totals without adding cache/reasoning subsets twice. Provider-reported cost keeps its unit and takes precedence over any dated estimate. Usage records, accumulated totals, coverage gaps and the attribution boundary are documented in [LLM metrics](LLM_METRICS.md).
 
+## DeepSeek reasoning history after a profile switch
+
+DeepSeek's [thinking-mode tool documentation](https://api-docs.deepseek.com/guides/thinking_mode/#tool-calls) requires reasoning content on historical assistant messages when tools are enabled, including assistant turns without tool calls. Omitting it can make a subsequent request fail with HTTP 400. The [Chat Completions schema](https://api-docs.deepseek.com/api/create-chat-completion/) describes the field as a nullable string and does not require nonempty text.
+
+A conversation switched from a model that did not expose reasoning may legitimately have no `reasoning_content` for some assistant turns. The DeepSeek Chat Completions adapter supplies an empty string in that case while preserving any recorded nonempty reasoning exactly. This is outgoing provider normalization, not invented reasoning or a modification of stored events. Keep the rule limited to DeepSeek reasoning requests; unrelated OpenAI-compatible models must not acquire unsupported fields. The provider regression covers both tool-call and ordinary assistant history and is separate from DEV-SDK-008's removal of foreign signed/encrypted continuation. See the [profile-switch evidence](../transpile/profile-switch.md) for the observed cross-provider failure and verification.
+
 ## Anthropic prompt caching
 
 Supported Anthropic models use explicit prefix caching by default through both native
