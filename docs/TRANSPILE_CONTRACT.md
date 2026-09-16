@@ -107,6 +107,30 @@ Before host switching, persist one `llm_history_origin` state-update anchor for 
 
 On an origin mismatch, outgoing copies omit `thinking_blocks` and `responses_reasoning_item`; an otherwise empty reasoning-only assistant turn is omitted. Preserve plaintext reasoning, visible text, tool requests/results, persisted history, and usage accounting. Same-binding native continuation remains intact. The pinned Python implementation only explicitly strips Responses reasoning for subscription transport; general cross-profile projection is a deliberate target behavior, not a claim of Python parity. See [profile-switch evidence](../transpile/profile-switch.md) and `src/agent/__tests__/profile-history.test.ts`.
 
+### DEV-SDK-009 — request causality for concurrent user input
+
+For serialized agent steps, capture the input event boundary synchronously with each outgoing
+Agent request. Persist an
+`llm_request_boundary` state-update event before the response events in the same serialized append
+batch. Its versioned payload identifies the last input event and explicit local response event IDs;
+provider response IDs and timestamps are not sufficient evidence. A batch is not a crash transaction:
+incomplete response membership leaves the marker inert.
+
+After applying condensation, project retained user arrivals that the request could not have seen
+after its response, preserving their relative order and content. Use the original full log to resolve
+boundaries without restoring forgotten events or moving messages across synthetic summaries. The
+existing provider tool-result projection still keeps completed tool exchanges adjacent. Do not change
+durable event order, public `eventsToMessages` semantics, usage accounting, or the server's obligation
+to run a follow-up for input not yet consumed. Response-owned corrective messages are not user arrivals.
+
+Old histories without provenance keep their recorded order; do not invent retrospective boundaries.
+As with `LocalConversation` and the server, callers must serialize steps sharing one state; this
+projection does not coordinate overlapping direct `Agent.step` calls.
+The pinned Python async loop detects mid-step arrivals, but source inspection does not establish
+equivalent durable plain-response causality. This target behavior is an intentional deviation, not a
+claim of an upstream runtime bug. Review upstream changes to async request capture, emission,
+condensation and event conversion against it. See [concurrent response evidence and recovery limits](../transpile/concurrent-response-history.md).
+
 ### EXC-SDK-001 — plugin runtime
 
 The Python plugin runtime is outside current transpilation scope unless this contract is deliberately changed.

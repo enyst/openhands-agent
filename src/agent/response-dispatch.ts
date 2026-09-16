@@ -1,5 +1,6 @@
 import { messageEventSchema, type Event } from '../event/index.js';
 import { type LLMCompletionResponse } from '../llm/client.js';
+import { requestBoundaryEvent } from '../llm/request-history.js';
 import { messageSchema, textContent, type Message, type TextContent } from '../llm/index.js';
 import {
   ConversationState,
@@ -21,6 +22,8 @@ export type LLMResponseType = (typeof llmResponseType)[keyof typeof llmResponseT
 export interface DispatchLlmResponseOptions {
   readonly llmResponseId?: string | null;
   readonly maxConcurrency?: number;
+  /** Last event in the immutable request snapshot; null for an empty input log. */
+  readonly inputEventId?: string | null;
   readonly executor?: ParallelToolExecutor;
   readonly maskSecretsInOutput?: ((text: string) => string) | null;
 }
@@ -53,7 +56,7 @@ export async function dispatchLlmResponse(
 
   if (responseType === llmResponseType.TOOL_CALLS) {
     const actions = actionEventsFromMessage(message, options.llmResponseId ?? null);
-    for (const event of await state.appendEventsAsync(actions)) {
+    for (const event of await appendResponseEvents(state, actions, options.inputEventId)) {
       emitted.push(event);
     }
     const executor = options.executor ?? new ParallelToolExecutor(options.maxConcurrency === undefined ? {} : { maxConcurrency: options.maxConcurrency });
@@ -68,20 +71,16 @@ export async function dispatchLlmResponse(
 
   // Every non-tool response emits the assistant message as it was received,
   // with registered secret values masked in its text (upstream #4783).
-  emitted.push(
-    await state.appendEventAsync(
-      messageEventSchema.parse({
-        source: 'agent',
-        llm_message: maskMessageSecrets(message, options.maskSecretsInOutput ?? null),
-        llm_response_id: options.llmResponseId ?? null,
-      }),
-    ),
-  );
-
+  const assistant = messageEventSchema.parse({
+    source: 'agent',
+    llm_message: maskMessageSecrets(message, options.maskSecretsInOutput ?? null),
+    llm_response_id: options.llmResponseId ?? null,
+  });
   if (responseType === llmResponseType.CONTENT) {
     // Visible text is a complete turn: hand control back to the user, exactly
     // like the Python SDK's _handle_content_response. The run loop stops when
     // the status is no longer RUNNING.
+    emitted.push(...await appendResponseEvents(state, [assistant], options.inputEventId));
     state.executionStatus = conversationExecutionStatus.FINISHED;
     return emitted;
   }
@@ -92,18 +91,12 @@ export async function dispatchLlmResponse(
   // user-role message so the model reads it as a turn, but its event source is
   // 'environment' so the framework (not the human) is its origin — this keeps
   // it from resetting the stuck-detection user-turn window (upstream #3954).
-  emitted.push(
-    await state.appendEventAsync(
-      messageEventSchema.parse({
-        source: 'environment',
-        llm_message: {
-          role: 'user',
-          content: [textContent(CORRECTIVE_NUDGE)],
-        },
-        llm_response_id: options.llmResponseId ?? null,
-      }),
-    ),
-  );
+  const nudge = messageEventSchema.parse({
+    source: 'environment',
+    llm_message: { role: 'user', content: [textContent(CORRECTIVE_NUDGE)] },
+    llm_response_id: options.llmResponseId ?? null,
+  });
+  emitted.push(...await appendResponseEvents(state, [assistant, nudge], options.inputEventId));
 
   return emitted;
 }
@@ -124,4 +117,9 @@ function maskMessageSecrets(message: Message, mask: ((text: string) => string) |
 
 function isTextContent(part: Message['content'][number]): part is TextContent {
   return part.type === 'text';
+}
+
+async function appendResponseEvents(state: ConversationState, events: readonly Event[], inputEventId: string | null | undefined): Promise<readonly Event[]> {
+  await state.appendEventsAsync(inputEventId === undefined ? events : [requestBoundaryEvent(inputEventId, events), ...events]);
+  return events;
 }
