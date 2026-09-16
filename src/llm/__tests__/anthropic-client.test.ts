@@ -42,7 +42,7 @@ describe('profile-resolved Anthropic Messages client', () => {
     expect(calls[0]?.headers['anthropic-beta']).toBe('interleaved-thinking-2025-05-14');
     expect(calls[0]?.body).toMatchObject({
       model: 'claude-sonnet-4-5',
-      system: 'You are terse.',
+      system: [{ type: 'text', text: 'You are terse.', cache_control: { type: 'ephemeral' } }],
       temperature: 0.1,
       max_tokens: 1024,
       messages: [{ role: 'user', content: [{ type: 'text', text: 'Ping?' }] }],
@@ -273,7 +273,7 @@ describe('Anthropic native tool calling', () => {
     });
     expect(body.messages[2]).toEqual({
       role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: 'toolu_01A', content: '72°F and sunny' }],
+      content: [{ type: 'tool_result', tool_use_id: 'toolu_01A', content: '72°F and sunny', cache_control: { type: 'ephemeral' } }],
     });
   });
 
@@ -306,7 +306,7 @@ describe('Anthropic native tool calling', () => {
         role: 'user',
         content: [
           { type: 'tool_result', tool_use_id: 'toolu_01A', content: 'rain' },
-          { type: 'tool_result', tool_use_id: 'toolu_01B', content: 'sun' },
+          { type: 'tool_result', tool_use_id: 'toolu_01B', content: 'sun', cache_control: { type: 'ephemeral' } },
         ],
       },
     ]);

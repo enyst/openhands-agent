@@ -32,6 +32,27 @@ Some provider fields are semantically necessary: reasoning content, signed think
 
 Usage needs the same care. Preserve missing versus zero counters, retain `providerUsage`, and normalize inclusive input/output totals without adding cache/reasoning subsets twice. Provider-reported cost keeps its unit and takes precedence over any dated estimate. Usage records, accumulated totals, coverage gaps and the attribution boundary are documented in [LLM metrics](LLM_METRICS.md).
 
+## Anthropic prompt caching
+
+Supported Anthropic models use explicit prefix caching by default through both native
+Messages and compatible Chat Completions gateways, including the eval proxy. Set the
+profile's `cachingPrompt: false` to disable it. Model capabilities select cache semantics;
+the profile's provider still selects credentials and transport.
+
+Provider request preparation marks the static system block and the latest user/tool
+content. Keep dynamic system context in a separate block. Tool-result markers belong on
+the outer native `tool_result` block, or on the outer Chat Completions tool message for
+the gateway to translate. Request preparation must not mutate persisted messages or
+accumulate old automatic markers. Gemini and ordinary OpenAI requests must not inherit
+Anthropic fields; OpenAI cache retention remains a separate option.
+
+Tests must use ordinary unmarked agent messages and inspect both transports. A cache
+smoke must also assert a provider-reported cache read after the initial write; request
+success alone proves nothing about caching. Run the Haiku test described in the
+[live test instructions](../scripts/live/README.md). The
+[port evidence](../transpile/anthropic-cache.md) records pinned Python behavior, legacy
+comparison, provider constraints and the regression this restores.
+
 ## Evidence for a quirk
 
 1. Record the observed failure, affected protocol/model/endpoint, and the relevant provider payload, documentation, or upstream dependency behavior. A provider fixture is sufficient to start when the Python SDK has no matching test.

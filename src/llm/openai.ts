@@ -16,7 +16,8 @@ import {
   type Message,
   type MessageToolCall,
 } from './index.js';
-import { isReasoningModel, normalizeGenerationParamsForModel, resolveOpenAIPromptCacheKey, resolveOpenAIPromptCacheRetention } from './provider-quirks.js';
+import { isAnthropicModel, isReasoningModel, normalizeGenerationParamsForModel, resolveOpenAIPromptCacheKey, resolveOpenAIPromptCacheRetention } from './provider-quirks.js';
+import { ANTHROPIC_CACHE_CONTROL, prepareAnthropicPromptCaching, validateAnthropicCacheBreakpoints } from './anthropic-prompt-cache.js';
 
 export { llmCompletionResponseSchema, llmUsageSchema } from './client.js';
 export type { FetchLike, FetchResponseLike, LLMClient, LLMCompletionResponse, LLMUsage } from './client.js';
@@ -177,7 +178,7 @@ export function buildChatCompletionsBody(
   const sendReasoningContent = isReasoningModel(normalizedProfile);
   const body: Record<string, unknown> = {
     model: normalizedProfile.model,
-    messages: orderCompletedToolResults(messages.map((message) => messageSchema.parse(message))).map((message) => toOpenAIChatMessage(message, sendReasoningContent)),
+    messages: prepareAnthropicPromptCaching(normalizedProfile, orderCompletedToolResults(messages.map((message) => messageSchema.parse(message)))).map((message) => toOpenAIChatMessage(message, sendReasoningContent)),
   };
   if (tools.length > 0) {
     body.tools = tools.map(toOpenAIChatTool);
@@ -198,6 +199,7 @@ export function buildChatCompletionsBody(
     body.reasoning_effort = normalizedProfile.reasoningEffort;
   }
   applyOpenAIPromptCacheOptions(body, normalizedProfile);
+  validateAnthropicCacheBreakpoints(body);
   return body;
 }
 
@@ -332,8 +334,11 @@ function toOpenAIChatTool(tool: ToolDefinition): Record<string, unknown> {
 function toOpenAIChatMessage(message: Message, sendReasoningContent = false): Record<string, unknown> {
   const out: Record<string, unknown> = {
     role: message.role,
-    content: serializeContent(message.content),
+    content: serializeContent(message.content, message.role !== 'tool'),
   };
+  if (message.role === 'tool' && message.content.some(content => content.cache_prompt)) {
+    out.cache_control = ANTHROPIC_CACHE_CONTROL;
+  }
   if (message.tool_calls !== null) {
     out.tool_calls = message.tool_calls.map(toOpenAIChatToolCall);
     if (isEmptySerializedContent(out.content)) {
@@ -360,15 +365,17 @@ function toOpenAIChatMessage(message: Message, sendReasoningContent = false): Re
   return out;
 }
 
-function serializeContent(content: readonly Content[]): string | readonly Record<string, unknown>[] {
-  if (content.every((item) => item.type === 'text')) {
+function serializeContent(content: readonly Content[], includeCacheControl = false): string | readonly Record<string, unknown>[] {
+  if (content.every((item) => item.type === 'text') && !(includeCacheControl && content.some(item => item.cache_prompt))) {
     return contentToString(content).join('\n');
   }
-  return content.map((item) => {
-    if (item.type === 'text') {
-      return { type: 'text', text: item.text };
-    }
-    return { type: 'image_url', image_url: { url: item.image_urls[0] ?? '' } };
+  return content.flatMap((item) => {
+    const blocks: Record<string, unknown>[] = item.type === 'text'
+      ? [{ type: 'text', text: item.text }]
+      : item.image_urls.map(url => ({ type: 'image_url', image_url: { url } }));
+    const last = blocks.at(-1);
+    if (last && includeCacheControl && item.cache_prompt) last.cache_control = ANTHROPIC_CACHE_CONTROL;
+    return blocks;
   });
 }
 
@@ -407,6 +414,7 @@ function parseChatCompletionsMetadata(raw: unknown, profile: LLMProfile): LLMRes
   const parsed = openAIChatCompletionResponseSchema.pick({ id: true, model: true, usage: true }).parse(raw);
   const usage = parsed.usage;
   const isOpenRouter = profile.providerId === 'openrouter' || new URL(resolveBaseUrl(profile)).hostname === 'openrouter.ai';
+  const isAnthropic = isAnthropicModel(profile);
   return llmResponseMetadataSchema.parse({
     // Input/output totals already include their cache/reasoning breakdowns.
     // DeepSeek's two cached-token fields are aliases, not separate usage.
@@ -414,8 +422,10 @@ function parseChatCompletionsMetadata(raw: unknown, profile: LLMProfile): LLMRes
       promptTokens: usage.prompt_tokens,
       completionTokens: usage.completion_tokens,
       totalTokens: usage.total_tokens,
-      cacheReadTokens: usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens,
-      cacheWriteTokens: usage.prompt_tokens_details?.cache_write_tokens,
+      cacheReadTokens: usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens
+        ?? (isAnthropic ? usage.cache_read_input_tokens ?? undefined : undefined),
+      cacheWriteTokens: usage.prompt_tokens_details?.cache_write_tokens
+        ?? (isAnthropic ? usage.cache_creation_input_tokens ?? usage.prompt_tokens_details?.cache_creation_tokens ?? undefined : undefined),
       cacheMissTokens: usage.prompt_cache_miss_tokens,
       reasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
       reportedCost: isOpenRouter && typeof usage.cost === 'number' && Number.isFinite(usage.cost) && usage.cost >= 0
@@ -610,9 +620,12 @@ const openAIChatCompletionResponseSchema = z
         total_tokens: z.number().int().min(0).optional(),
         prompt_cache_hit_tokens: z.number().int().min(0).optional(),
         prompt_cache_miss_tokens: z.number().int().min(0).optional(),
+        cache_read_input_tokens: z.number().int().min(0).nullish(),
+        cache_creation_input_tokens: z.number().int().min(0).nullish(),
         prompt_tokens_details: z.object({
           cached_tokens: z.number().int().min(0).optional(),
           cache_write_tokens: z.number().int().min(0).optional(),
+          cache_creation_tokens: z.number().int().min(0).nullish(),
         }).passthrough().nullish(),
         completion_tokens_details: z.object({
           reasoning_tokens: z.number().int().min(0).optional(),

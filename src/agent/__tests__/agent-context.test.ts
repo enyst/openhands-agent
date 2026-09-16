@@ -21,7 +21,7 @@ describe('Agent context and condenser integration', () => {
 
     expect(llm.messages[0]?.role).toBe('system');
     expect(llm.messages[0]?.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('Base system.') });
-    expect(llm.messages[0]?.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('Repo context.') });
+    expect(llm.messages[0]?.content[1]).toMatchObject({ type: 'text', text: expect.stringContaining('Repo context.') });
   });
 
   it('emits condensation without calling the LLM when condenser requests it', async () => {

@@ -45,10 +45,44 @@ to the live-test step. The workflow runs on manual dispatch, with a six-minute j
 timeout and serialized runs. It does not expose credentials to pull-request code.
 Ordinary CI type-checks these scripts without credentials or API calls.
 
-## Existing scripts
+## Anthropic prompt caching (Haiku)
+
+The cache smoke runs ordinary `Agent` turns, with no manually marked cache blocks.
+It requires a real initial cache write, cache reads on the following turn and after
+restoring event history, and exact per-call/accumulated cache metrics. A zero-hit
+result fails. The synthetic prefix exceeds Haiku 4.5's 4,096-token cache minimum;
+a per-run nonce prevents an earlier run's warm cache from hiding a missing write.
+Only `finish` is exposed as a tool. Three completions are expected; six requests,
+192 output tokens per request, 45 seconds per request and three minutes overall
+are hard limits. Logs contain usage and marker counts, never credentials or text.
+
+For native Anthropic, set `ANTHROPIC_API_KEY` and run:
+
+```sh
+npm run live:anthropic-cache-smoke
+```
+
+For the eval-proxy route used by SmolPaws, set `LITELLM_PROXY_API_KEY` and run:
+
+```sh
+LLM_PROVIDER_ID=litellm_proxy \
+LLM_MODEL=anthropic/claude-haiku-4-5-20251001 \
+LLM_BASE_URL=https://llm-proxy.eval.all-hands.dev/v1 \
+npm run live:anthropic-cache-smoke
+```
+
+`LLM_MODEL` (or `ANTHROPIC_MODEL`) and `LLM_BASE_URL` select a different model or
+endpoint. The default native model is Haiku 4.5. Missing credentials fail instead
+of skipping. The **Live LLM** workflow also runs this regression from canonical
+`main`, in the **LLM** environment, using secret `LITELLM_PROXY_API_KEY` and optional
+variable `ANTHROPIC_CACHE_MODEL`. It uses Haiku through the eval proxy by default.
+Deterministic upstream-derived tests remain the parity evidence; this script proves
+that the real provider accepts the serialized requests and reports cached usage.
+
+## Other scripts
 
 - `llm-smoke.mjs` (`live:llm`) resolves credentials from the local OS keyring.
-- `openai-responses-reasoning.ts` and `anthropic-cache-smoke.ts` use environment
-  credentials through the same example helper; missing keys currently skip them.
+- `openai-responses-reasoning.ts` uses environment credentials through the same
+  example helper; missing keys currently skip that separate script.
 - The separate **Examples** workflow uses the existing `examples` environment
   with OpenAI, Anthropic and Gemini secrets. It is independent of `LLM`.
