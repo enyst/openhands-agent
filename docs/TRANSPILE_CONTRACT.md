@@ -79,6 +79,8 @@ Do not port Python `Cipher` or its plaintext/encrypted-at-rest persistence split
 
 Product/REST callers select an `LLMProfile`; they do not configure a Python-style bare `LLM` object or rely on an implicit default model. Low-level provider clients may remain exported for advanced SDK/testing use.
 
+The optional `switch_llm` builtin retains the upstream profile-name/reason input and structured observation. Hosts provide saved profile names and a profile-selection callback; the SDK does not choose a global profile database. A callback may prepare and durably accept a pending selection during tool execution, then install it at the completed-step boundary before the next LLM call. Its success text describes acceptance for that next call, rather than claiming the currently executing batch changed models. Failure leaves the working selection intact. Settings-driven hosts honor `enable_switch_llm_tool` (default true); it is not one of the unconditional `BUILT_IN_TOOLS`.
+
 ### DEV-SDK-005 — no ACP runtime execution
 
 ACP execution/model-switching runtime behavior is not part of this transpilation.
@@ -94,6 +96,16 @@ Preserve per-completion usage, accumulation by usage ID, independent snapshots, 
 The Python metric defaults collapse several absent values to zero and assume a scalar cost. This target deliberately represents absent token/cost fields and incomplete accumulated totals as unknown, with known subtotals and explicit coverage. Keep currency/unit and provider-reported versus calculated provenance. A reported zero remains zero; an unavailable price remains unknown. Derived prices require a retained dated quote and matching provider/model semantics; subscription usage must not inherit API pricing. Normalize inclusive input/output totals before deriving cache rates, without guessing inclusion conventions from the relative counter sizes.
 
 The target exposes immutable record projections and compact snapshots rather than Python's mutable `Metrics`/`LLMRegistry` objects. Its durable `llm_usage` and `llm_metrics_reset` state-update keys replace Python's separate metrics state-file storage. Preserve explicit null values and provider usage detail inside the accounting payload during disk serialization; the ordinary event serializer's null omission must not turn unknowns into malformed records. Missing historical records remain unmeasured; do not reconstruct billed usage from transcript text. Full Python `base_state.stats` import and automatic attribution of standalone/auxiliary client calls are outside this implementation and must not be claimed as parity. Upstream changes to these surfaces still require review. See [metric semantics and limits](LLM_METRICS.md) and [port evidence](../transpile/llm-metrics.md).
+
+Per-completion records may include a non-secret `history_origin` digest to associate opaque continuation data with its producing profile binding. This provenance does not create a billable call or reset accumulated usage; absent historical provenance remains unknown. See DEV-SDK-008.
+
+### DEV-SDK-008 — cross-profile opaque reasoning projection
+
+When a saved conversation changes profile binding, project its outgoing transcript without replaying signed or encrypted reasoning from a different binding. `src/llm/history.ts` associates responses with the preceding usage record in event order, including when a provider reuses response IDs. Binding identity hashes profile ID, provider, requested model, sanitized endpoint origin/path, API mode, and authentication selection. Raw credentials, headers, URL userinfo, and URL query values are excluded. Credential/header/query-only edits within the same profile therefore do not establish a distinguishable origin.
+
+Before host switching, persist one `llm_history_origin` state-update anchor for the original binding. Unknown events before that anchor may retain opaque continuation only for the original binding; known incompatible legacy profile/provider/model metadata overrides that inference. Unknown events after the anchor cannot inherit that trust. This is a compatibility projection, not reconstructed historical provider evidence.
+
+On an origin mismatch, outgoing copies omit `thinking_blocks` and `responses_reasoning_item`; an otherwise empty reasoning-only assistant turn is omitted. Preserve plaintext reasoning, visible text, tool requests/results, persisted history, and usage accounting. Same-binding native continuation remains intact. The pinned Python implementation only explicitly strips Responses reasoning for subscription transport; general cross-profile projection is a deliberate target behavior, not a claim of Python parity. See [profile-switch evidence](../transpile/profile-switch.md) and `src/agent/__tests__/profile-history.test.ts`.
 
 ### EXC-SDK-001 — plugin runtime
 
@@ -129,6 +141,14 @@ with `meta.smolpaws_execution_context: true` receives `{ actionEventId, toolCall
 argument, allowing durable command deduplication. Ordinary tools retain their existing invocation.
 This opt-in belongs to EXT-SDK-001/002: it adds no fields to wire events, no scheduling/delivery engine,
 and no confirmation or queue semantics to the agent loop.
+
+### EXT-SDK-003 — host preparation at completed-step boundaries
+
+`LocalConversation` may accept an `onStepBoundary(agent)` callback implemented through `src/conversation/ext/step-boundary.ts`. It runs before the first step of a running invocation and after every successfully awaited step, including a final finish response, when all results have been appended. It may return a replacement `Agent`; the conversation retains its state, event log, iteration count, limits, and stuck detector. A rejected callback propagates without replacing the current agent. Concurrent `run()` callers share the active run, so they cannot prepare a replacement during an active batch or reset its iteration budget. Calls without this hook preserve the existing single-run behavior.
+
+The host owns selection policy, validation, client construction, pending-selection persistence, and activation persistence. It must complete activation persistence before returning a replacement and must never wait for the current run from inside a tool executor. This extension adds no profile storage, SmolPaws paths, new action wire fields, or implicit auxiliary-model switching to the SDK. The optional upstream `switch_llm` tool remains a parity port governed by DEV-SDK-004; this host callback is the separate additive integration seam. See [profile-switch port evidence](../transpile/profile-switch.md).
+
+Terminal execution status is updated before the final boundary callback. A read-only `lastStepUserMessageId` records the latest user event synchronously immediately before `Agent.step`, so a host can distinguish input consumed by that step from input arriving during later preparation or completion. This queue-coordination marker is part of the host seam, not an upstream switch-tool field.
 
 ## Context and persistent memory
 

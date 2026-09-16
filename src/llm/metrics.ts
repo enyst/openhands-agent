@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { conversationStateUpdateEventSchema, type Event } from '../event/index.js';
 import { llmUsageSchema, type LLMResponseMetadata } from './client.js';
@@ -16,10 +16,22 @@ const costSchema = z.object({
 const usageRecordSchema = z.object({
   version: z.literal(1), record_id: z.string().min(1), response_id: z.string().nullable(),
   usage_id: z.string().min(1), profile_id: z.string(), provider_id: z.string(),
+  history_origin: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
   model: z.string(), requested_model: z.string(), timestamp: z.string().datetime(),
   latency: z.number().finite().nonnegative(), usage: llmUsageSchema.nullable(), cost: costSchema.nullable(),
 }).strict();
 export type UsageRecord = z.infer<typeof usageRecordSchema>;
+
+/** Bind opaque provider continuation to its originating profile without persisting credentials. */
+export function llmHistoryOrigin(profile: LLMProfile): string {
+  const endpoint = profile.baseUrl === null ? null : new URL(profile.baseUrl);
+  return createHash('sha256').update(JSON.stringify([
+    profile.profileId, profile.providerId, profile.model,
+    // URL userinfo/query and custom headers may contain credentials. They never enter this digest.
+    endpoint === null ? null : `${endpoint.origin}${endpoint.pathname}`,
+    profile.openAiApiMode, profile.authType, profile.subscriptionVendor, profile.useProfileKeyOverride,
+  ])).digest('hex');
+}
 
 const fields = {
   prompt_tokens: 'promptTokens', completion_tokens: 'completionTokens', total_tokens: 'totalTokens',
@@ -70,6 +82,7 @@ export function createLlmUsageEvent(profile: LLMProfile, response: LLMResponseMe
   const record = usageRecordSchema.parse({
     version: 1, record_id: recordId, response_id: response.responseId ?? null,
     usage_id: timing.usageId ?? `profile:${profile.profileId}`, profile_id: profile.profileId,
+    history_origin: llmHistoryOrigin(profile),
     provider_id: profile.providerId, model: response.model ?? profile.model, requested_model: profile.model,
     timestamp: new Date(timing.completedAt).toISOString(), latency: Math.max(0, timing.completedAt - timing.startedAt) / 1000,
     usage: structuredClone(response.usage), cost,

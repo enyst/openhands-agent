@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 import { registerBuiltinResolver, ToolDefinition, toolAnnotationsSchema, type ToolAnnotations } from './index.js';
+import { SwitchLLMTool } from './switch-llm.js';
+
+export * from './switch-llm.js';
 
 export const baseObservationSchema = z
   .object({
@@ -93,6 +96,7 @@ export const BUILT_IN_TOOLS = [() => FinishTool.create(), () => ThinkTool.create
 export const BUILT_IN_TOOL_FACTORIES = {
   FinishTool: () => FinishTool.create(),
   ThinkTool: () => ThinkTool.create(),
+  SwitchLLMTool: () => SwitchLLMTool.create(),
 } satisfies Readonly<Record<string, BuiltInToolFactory>>;
 
 // Register built-ins with the global registry by *tool* name (not class name),

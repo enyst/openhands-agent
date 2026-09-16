@@ -12,6 +12,7 @@ import { View, type Condenser } from '../context/index.js';
 import type { AgentContext } from '../context/index.js';
 import { LLMResponseError, type LLMClient } from '../llm/client.js';
 import { createLlmUsageEvent } from '../llm/metrics.js';
+import { historyForProfile } from '../llm/history.js';
 import { isContentPolicyViolation } from '../llm/exceptions.js';
 import { textContent, type Message, type TextContent } from '../llm/index.js';
 import type { ToolDefinition } from '../tool/index.js';
@@ -98,7 +99,7 @@ export class Agent {
       state.appendEvent(condensed);
       return null;
     }
-    const messages = eventsToMessages(condensed.events.filter(isLlmConvertibleEvent));
+    const messages = eventsToMessages(historyForProfile(condensed.events.filter(isLlmConvertibleEvent), state.events, this.llm.profile));
     const system = this.renderSystemPrompt();
     if (system !== null) {
       return [systemMessage(system), ...messages];
