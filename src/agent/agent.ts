@@ -13,6 +13,7 @@ import type { AgentContext } from '../context/index.js';
 import { LLMResponseError, type LLMClient } from '../llm/client.js';
 import { createLlmUsageEvent } from '../llm/metrics.js';
 import { historyForProfile } from '../llm/history.js';
+import { historyForRequests } from '../llm/request-history.js';
 import { isContentPolicyViolation } from '../llm/exceptions.js';
 import { textContent, type Message, type TextContent } from '../llm/index.js';
 import type { ToolDefinition } from '../tool/index.js';
@@ -51,7 +52,9 @@ export class Agent {
   }
 
   async step(state: ConversationState): Promise<readonly Event[]> {
-    const messages = this.messagesForState(state);
+    const history = [...state.events];
+    const inputEventId = history.at(-1)?.id ?? null;
+    const messages = this.messagesForState(state, history);
     if (messages === null) {
       return [state.events.at(-1)].filter((event): event is Event => event !== undefined);
     }
@@ -89,17 +92,18 @@ export class Agent {
     return dispatchLlmResponse(response, state, (action) => this.runTool(action), {
       llmResponseId: response.responseId ?? accounting.id,
       maxConcurrency: this.toolConcurrencyLimit,
+      inputEventId,
     });
   }
 
-  private messagesForState(state: ConversationState): Message[] | null {
-    const view = View.fromEvents(state.events);
+  private messagesForState(state: ConversationState, history: readonly Event[]): Message[] | null {
+    const view = View.fromEvents(history);
     const condensed = this.condenser?.condense(view, this.llm) ?? view;
     if (!(condensed instanceof View)) {
       state.appendEvent(condensed);
       return null;
     }
-    const messages = eventsToMessages(historyForProfile(condensed.events.filter(isLlmConvertibleEvent), state.events, this.llm.profile));
+    const messages = eventsToMessages(historyForProfile(historyForRequests(condensed.events.filter(isLlmConvertibleEvent), history), history, this.llm.profile));
     const system = this.renderSystemPrompt();
     if (system !== null) {
       return [systemMessage(system), ...messages];

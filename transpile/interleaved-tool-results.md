@@ -31,3 +31,7 @@ projection, missing results, unrelated results and assistant boundaries. Live De
 are viability evidence, not a claim that a Python differential test was executed.
 
 This is a provider compatibility correction, not an upstream pin advance or new runtime queue.
+
+For a user arrival during a plain assistant completion, there is no tool pair to establish the
+boundary. [DEV-SDK-009](concurrent-response-history.md) records request causality and projects that
+separate case before conversion; this completed-tool helper remains necessary for tool-time arrivals.
