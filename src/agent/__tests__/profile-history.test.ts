@@ -145,13 +145,31 @@ describe('profile switching preserves history without replaying foreign opaque r
     expect(state.stats.coverage.invalid_record_count).toBe(0);
   });
 
-  it('omits reasoning-only foreign turns rather than producing empty native assistant messages', async () => {
+  it.each([{ content: '' }, { content: '   ' }, { content: [] }])('omits reasoning-only foreign turns with content $content rather than producing empty native assistant messages', async ({ content }) => {
     const state = new ConversationState();
-    await new Agent({ llm: client(profiles[0]!, messageSchema.parse({ ...reply('opaque-only'), content: [] })) }).step(state);
+    await new Agent({ llm: client(profiles[0]!, messageSchema.parse({ ...reply('opaque-only'), content })) }).step(state);
     const target = client(profiles[1]!, messageSchema.parse({ role: 'assistant', content: 'next' }));
     await new Agent({ llm: target }).step(state);
     expect(target.calls[0]!.every(message => message.role !== 'assistant')).toBe(true);
     expect(state.events.some(event => event.kind === 'MessageEvent' && event.llm_message.responses_reasoning_item?.encrypted_content === 'cipher-opaque-only')).toBe(true);
+  });
+
+  it.each([
+    { content: [{ type: 'image', image_urls: ['data:image/png;base64,AA=='] }], extended_content: [] },
+    { content: '', extended_content: [textContent('visible extended content')] },
+  ])('retains foreign assistant images and extended content when removing opaque reasoning: %j', async (payload) => {
+    const state = new ConversationState();
+    await ensureLlmHistoryOrigin(state, profiles[0]!);
+    state.appendEvent(messageEventSchema.parse({
+      source: 'agent', llm_message: { ...reply('visible'), content: payload.content }, extended_content: payload.extended_content,
+    }));
+    const target = client(profiles[1]!, messageSchema.parse({ role: 'assistant', content: 'next' }));
+    await new Agent({ llm: target }).step(state);
+    const retained = target.calls[0]!.find(message => message.role === 'assistant');
+    expect(retained).toBeDefined();
+    expect(retained!.content.some(item => item.type === 'image' || item.type === 'text' && item.text.trim().length > 0)).toBe(true);
+    expect(retained!.thinking_blocks).toEqual([]);
+    expect(retained!.responses_reasoning_item).toBeNull();
   });
 
   it('excludes credentials and incidental generation settings from the origin digest', () => {

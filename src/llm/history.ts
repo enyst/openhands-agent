@@ -1,6 +1,6 @@
 import type { ConversationState } from '../conversation/state.js';
 import { conversationStateUpdateEventSchema, type Event, type LLMConvertibleEvent } from '../event/index.js';
-import type { LLMProfile } from './index.js';
+import type { Content, LLMProfile } from './index.js';
 import { LLM_USAGE_KEY, llmHistoryOrigin } from './metrics.js';
 
 export const LLM_HISTORY_ORIGIN_KEY = 'llm_history_origin';
@@ -49,10 +49,14 @@ export function historyForProfile(
     if (event.kind !== 'MessageEvent' || event.llm_message.role !== 'assistant') return [event];
     const message = event.llm_message;
     // A reasoning-only turn cannot become an empty assistant turn in native provider payloads.
-    if (message.content.length === 0 && event.extended_content.length === 0 && !message.tool_calls?.length
+    if (!hasVisibleContent(message.content) && !hasVisibleContent(event.extended_content) && !message.tool_calls?.length
       && (message.thinking_blocks.length > 0 || message.responses_reasoning_item !== null)) return [];
     return [{ ...event, llm_message: { ...message, thinking_blocks: [], responses_reasoning_item: null } }];
   });
+}
+
+function hasVisibleContent(content: readonly Content[]): boolean {
+  return content.some(item => item.type !== 'text' || item.text.trim().length > 0);
 }
 
 function legacyOrigin(events: readonly Event[]): string | null {
