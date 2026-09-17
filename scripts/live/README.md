@@ -56,8 +56,9 @@ Only `finish` is exposed as a tool. Three completions are expected; six requests
 192 output tokens per request, 45 seconds per request and three minutes overall
 are hard limits. Logs contain usage and marker counts, never credentials or text.
 
-`ANTHROPIC_CACHE_TTL` accepts `5m` (local default) or `1h`. Each outgoing marker must
-match that selection. With `1h`, the cold response must report at least 4,096
+`ANTHROPIC_CACHE_TTL` accepts `5m` or `1h`. When unset, the profile omits the optional
+field and requests retain Anthropic's five-minute default. Each outgoing marker must
+match the effective duration. With `1h`, the cold response must report at least 4,096
 `ephemeral_1h_input_tokens`, and every response's one-hour writes must equal its total
 cache writes. This reads native `usage.cache_creation` or the proxy's
 `usage.prompt_tokens_details.cache_creation_token_details`; missing duration counters
