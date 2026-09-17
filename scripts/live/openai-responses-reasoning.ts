@@ -1,13 +1,13 @@
 #!/usr/bin/env tsx
 
 import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
   createOpenAIResponsesClientFromProfile,
-  llmProfileSchema,
   messageSchema,
   textContent,
   type FetchLike,
@@ -15,7 +15,7 @@ import {
   type Message,
 } from '@smolpaws/openhands-agent';
 
-import { createExampleLlmSecretStore, providerApiKeyEnvName } from '../../examples/_shared/exampleProfile.js';
+import { createExampleLlmSecretStore, providerApiKeyEnvName, resolveExampleLlmProfile } from '../../examples/_shared/exampleProfile.js';
 
 const MODEL = process.env.OPENAI_RESPONSES_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || process.env.LLM_MODEL?.trim() || 'gpt-5-mini';
 const MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_RESPONSES_MAX_OUTPUT_TOKENS ?? 1024);
@@ -24,8 +24,9 @@ const MODE_MINIMAL = 'minimal';
 const MODE_BOTH = 'both';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUT_ROOT = join(SCRIPT_DIR, '..', 'fixtures', 'openai-responses');
+const strict = process.argv.includes('--strict');
 
-const profile = llmProfileSchema.parse({
+const profile = resolveExampleLlmProfile({
   profileId: process.env.LLM_PROFILE?.trim() || 'live-openai-responses-reasoning',
   providerId: 'openai',
   model: MODEL,
@@ -36,6 +37,7 @@ const profile = llmProfileSchema.parse({
 });
 const maybeStore = createExampleLlmSecretStore(profile);
 if (maybeStore === null) {
+  assert.ok(!strict, 'Strict reasoning regression requires OPENAI_API_KEY');
   console.log(`openai-responses-reasoning: set ${providerApiKeyEnvName(profile.providerId)} to run this live Responses reasoning test.`);
   process.exit(0);
 }
@@ -144,9 +146,15 @@ function makeFetch(context: RunContext): FetchLike {
     if (context.mode === MODE_FULL) {
       body = replayFullReasoningItems(body, context.rawReasoningById);
     }
+    if (strict && context.turn > 1) {
+      const reasoning = Array.isArray(body.input) ? body.input.filter(item => isRecord(item) && item.type === 'reasoning') : [];
+      assert.ok(reasoning.length > 0, 'Later requests must replay native reasoning items');
+      assert.ok(reasoning.every(item => isRecord(item) && typeof item.encrypted_content === 'string' && item.encrypted_content.length > 0),
+        'Every replayed reasoning item must preserve encrypted continuation content');
+    }
     await writeArtifact(join(context.outDir, `turn${context.turn}_request.json`), body);
 
-    const response = await fetch(url, { ...init, body: JSON.stringify(body) });
+    const response = await fetch(url, { ...init, body: JSON.stringify(body), signal: AbortSignal.timeout(45_000) });
     const responseText = await response.text();
     await writeArtifact(join(context.outDir, `turn${context.turn}_response.json`), responseText);
     return {
@@ -210,6 +218,12 @@ async function runConversation(mode: string, outDir: string): Promise<void> {
     messages.push(messageSchema.parse({ role: 'user', content: [textContent(prompts[index])] }));
     const response = await client.complete(messages);
     const reasoningItems = rawReasoningItems(response);
+    if (strict) {
+      assert.ok(response.message.content.some(content => content.type === 'text' && content.text.trim().length > 0), 'Each reasoning turn must return visible text');
+      assert.ok(reasoningItems.some(item => typeof item.encrypted_content === 'string' && item.encrypted_content.length > 0), 'Provider must return encrypted reasoning to exercise replay');
+      assert.ok(typeof response.message.responses_reasoning_item?.encrypted_content === 'string'
+        && response.message.responses_reasoning_item.encrypted_content.length > 0, 'Native client must preserve encrypted reasoning');
+    }
     const replayedItems = reasoningItems.map((item) => {
       if (typeof item.id === 'string') {
         context.rawReasoningById.set(item.id, item);
