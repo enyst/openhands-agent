@@ -45,6 +45,15 @@ Messages and compatible Chat Completions gateways, including the eval proxy. Set
 profile's `cachingPrompt: false` to disable it. Model capabilities select cache semantics;
 the profile's provider still selects credentials and transport.
 
+`anthropicCacheTtl` selects `'5m'` (the default) or `'1h'` for every explicit breakpoint
+in that profile's requests, on both transports. One hour emits
+`cache_control: {type: 'ephemeral', ttl: '1h'}`; five minutes retains `{type: 'ephemeral'}`.
+The same duration applies to automatic and caller-selected markers. A single duration
+avoids mixed-TTL ordering constraints. One-hour writes have a higher provider charge;
+cache hits refresh the lifetime. See [Anthropic's cache documentation](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+Saved profiles lacking the field normalize to five minutes. This option does not enable
+caching for unsupported models or override `cachingPrompt: false`.
+
 Provider request preparation marks the static system block and the latest user/tool
 content. Keep dynamic system context in a separate block. Tool-result markers belong on
 the outer native `tool_result` block, or on the outer Chat Completions tool message for
@@ -54,7 +63,8 @@ Anthropic fields; OpenAI cache retention remains a separate option.
 
 Tests must use ordinary unmarked agent messages and inspect both transports. A cache
 smoke must also assert a provider-reported cache read after the initial write; request
-success alone proves nothing about caching. Run the Haiku test described in the
+success alone proves nothing about caching. With one hour selected, require the provider's
+`ephemeral_1h_input_tokens` write counter too. Run the Haiku test described in the
 [live test instructions](../scripts/live/README.md). The
 [port evidence](../transpile/anthropic-cache.md) records pinned Python behavior, legacy
 comparison, provider constraints and the regression this restores.

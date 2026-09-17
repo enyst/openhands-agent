@@ -1,7 +1,9 @@
 # Anthropic prompt caching
 
-Classification: **PORT / provider compatibility**, at the unchanged canonical pin in
-[`upstream.json`](upstream.json). Tracking: SmolPaws bead `smolpaws-i7d`.
+Classification: the automatic-breakpoint repair is **PORT / provider compatibility**;
+profile-selected duration is **DEVIATION / DEV-SDK-004**. Both use the unchanged canonical
+pin in [`upstream.json`](upstream.json). Tracking: SmolPaws beads `smolpaws-i7d` (repair)
+and `smolpaws-35d` (duration).
 
 ## Missed behavior
 
@@ -101,7 +103,46 @@ blocks cannot carry explicit markers. Native `input_tokens` excludes cache reads
 writes, so inclusive input adds all three categories. Gateway usage must be normalized
 according to its own response shape, retaining the raw counters.
 
-This fixes missed in-scope behavior without advancing the upstream pin or adding a
+The original automatic-breakpoint repair fixes missed in-scope behavior without advancing the upstream pin or adding a
 `DEV-*`, `EXC-*` or `EXT-*` policy. Future transpilation reviews must inspect provider
 capabilities and dependency-supplied wire behavior even when the TypeScript provider
 adapter differs from Python's LiteLLM implementation.
+
+## Profile-selected duration (DEV-SDK-004)
+
+At the canonical pin, Python's `llm/message.py` emits `{type: "ephemeral"}` for text,
+images and lifted tool results; `llm/llm.py` has no Anthropic cache-duration setting.
+Its `prompt_cache_retention` is an OpenAI setting and is not an Anthropic TTL.
+The target deliberately adds `LLMProfile.anthropicCacheTtl: '5m' | '1h'`, defaulting
+to `'5m'` for old profiles. This is a profile-boundary deviation under
+[DEV-SDK-004](../docs/TRANSPILE_CONTRACT.md#dev-sdk-004--profile-first-product-llm-boundary),
+not an unported Python option or a claim of new parity.
+
+Both native Messages and Anthropic-compatible Chat Completions apply the selected TTL
+at every existing breakpoint. Five minutes keeps the previous wire payload unchanged;
+one hour adds `ttl: "1h"`. Duration is request metadata, not a new content/event field.
+Preserve input immutability, empty/thinking exclusions, tool-result marker lifting,
+multi-image placement, opt-out and the four-breakpoint limit. Unrelated providers and
+subscription requests receive no Anthropic marker. OpenAI retention remains independent.
+
+The parameterized deterministic tests cover both durations through ordinary Agent
+requests and the wire builders. Profile parsing rejects other values and JSON restore
+preserves an explicit duration. Sequential one-hour/five-minute requests must not share
+mutable marker state. The server separately tests profile persistence and conversation
+snapshot behavior; changing the SDK default is not a migration of existing conversations.
+
+The Haiku smoke accepts `ANTHROPIC_CACHE_TTL=1h` (local default: `5m`). It inspects each
+outgoing marker and requires a positive one-hour write, then cache reads across normal
+and restored turns. Native evidence is `usage.cache_creation.ephemeral_1h_input_tokens`;
+the eval proxy exposes `usage.prompt_tokens_details.cache_creation_token_details`.
+Aggregate write counts alone do not prove duration. The GitHub **LLM** environment job
+defaults to `1h`; it remains a manual, canonical-main live test. No one-hour live result
+is implied by the deterministic tests.
+
+On September 17, 2026, the isolated eval-proxy Haiku smoke passed with `1h` selected:
+the cold request reported 9,719 one-hour cache-write tokens, the next request read
+9,719 and wrote 110, and the restored turn read 9,829 and wrote 110. Every request had
+two one-hour markers. Across three completions, inclusive input was 29,496 tokens,
+output was 174, cache reads were 19,548, and all 9,939 cache-write tokens were explicitly
+reported as one hour. Restored accounting matched exactly. This used only synthetic
+test context and Haiku; it did not send a request to a live SmolPaws conversation.

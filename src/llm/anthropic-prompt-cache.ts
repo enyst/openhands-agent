@@ -30,14 +30,18 @@ function cacheable(content: Content): boolean {
   return content.type === 'text' ? content.text.length > 0 : content.image_urls.length > 0;
 }
 
-/** Count wire locations, including lifted tool-result markers, not nested data. */
-export function validateAnthropicCacheBreakpoints(body: Record<string, unknown>): void {
+/** Apply one profile duration to actual wire breakpoints, including lifted tool results. */
+export function finalizeAnthropicCacheBreakpoints(profile: LLMProfile, body: Record<string, unknown>): void {
   const system = Array.isArray(body.system) ? body.system as Record<string, unknown>[] : [];
   const messages = Array.isArray(body.messages) ? body.messages as Record<string, unknown>[] : [];
   const blocks = [...system, ...messages.flatMap(message => [
     message, ...(Array.isArray(message.content) ? message.content as Record<string, unknown>[] : []),
   ])];
-  if (blocks.filter(block => block.cache_control !== undefined).length > 4) {
+  const breakpoints = blocks.filter(block => block.cache_control !== undefined);
+  if (breakpoints.length > 4) {
     throw new Error('Anthropic prompt caching supports at most 4 cache breakpoints per request.');
+  }
+  if (profile.anthropicCacheTtl === '1h') {
+    for (const block of breakpoints) block.cache_control = { type: 'ephemeral', ttl: '1h' };
   }
 }

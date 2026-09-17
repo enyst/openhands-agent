@@ -17,7 +17,7 @@ import {
   type MessageToolCall,
 } from './index.js';
 import { isAnthropicModel, isReasoningModel, normalizeGenerationParamsForModel, resolveOpenAIPromptCacheKey, resolveOpenAIPromptCacheRetention } from './provider-quirks.js';
-import { ANTHROPIC_CACHE_CONTROL, prepareAnthropicPromptCaching, validateAnthropicCacheBreakpoints } from './anthropic-prompt-cache.js';
+import { ANTHROPIC_CACHE_CONTROL, prepareAnthropicPromptCaching, finalizeAnthropicCacheBreakpoints } from './anthropic-prompt-cache.js';
 
 export { llmCompletionResponseSchema, llmUsageSchema } from './client.js';
 export type { FetchLike, FetchResponseLike, LLMClient, LLMCompletionResponse, LLMUsage } from './client.js';
@@ -205,7 +205,7 @@ export function buildChatCompletionsBody(
     body.reasoning_effort = normalizedProfile.reasoningEffort;
   }
   applyOpenAIPromptCacheOptions(body, normalizedProfile);
-  validateAnthropicCacheBreakpoints(body);
+  finalizeAnthropicCacheBreakpoints(normalizedProfile, body);
   return body;
 }
 

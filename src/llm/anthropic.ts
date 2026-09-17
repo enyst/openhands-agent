@@ -8,7 +8,7 @@ import { llmCompletionResponseSchema, llmResponseMetadataSchema, parseLlmRespons
 import { isContentPolicyViolation, LLMContentPolicyViolationError } from './exceptions.js';
 import { messageSchema, reduceTextContent, type Content, type LLMProfile, type Message, type MessageToolCall } from './index.js';
 import { getAnthropicThinkingBudget, normalizeGenerationParamsForModel } from './provider-quirks.js';
-import { ANTHROPIC_CACHE_CONTROL, prepareAnthropicPromptCaching, validateAnthropicCacheBreakpoints } from './anthropic-prompt-cache.js';
+import { ANTHROPIC_CACHE_CONTROL, prepareAnthropicPromptCaching, finalizeAnthropicCacheBreakpoints } from './anthropic-prompt-cache.js';
 
 export { llmProfileSchema } from './index.js';
 export type { LLMProfile } from './index.js';
@@ -107,7 +107,7 @@ export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readon
   if (thinkingBudget !== undefined) {
     body.thinking = { type: 'enabled', budget_tokens: thinkingBudget };
   }
-  validateAnthropicCacheBreakpoints(body);
+  finalizeAnthropicCacheBreakpoints(normalizedProfile, body);
   return body;
 }
 
