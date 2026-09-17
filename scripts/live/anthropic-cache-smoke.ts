@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   Agent, FinishTool, LocalConversation, createClientFromProfile,
   llmProfileSchema, metricsSnapshot, restoreConversationState,
-  type ConversationStats, type Event,
+  type AnthropicCacheTtl, type ConversationStats, type Event,
 } from '@smolpaws/openhands-agent';
 import { createExampleLlmSecretStore, providerApiKeyEnvName } from '../../examples/_shared/exampleProfile.js';
 
@@ -19,6 +19,7 @@ test('Anthropic caching: writes, reads, tool continuation and restored accountin
     model: process.env.ANTHROPIC_MODEL?.trim() || process.env.LLM_MODEL?.trim()
       || (providerId === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'anthropic/claude-haiku-4-5-20251001'),
     baseUrl: process.env.LLM_BASE_URL?.trim() || null, maxOutputTokens: 192,
+    anthropicCacheTtl: process.env.ANTHROPIC_CACHE_TTL?.trim() || '5m',
   });
   const store = createExampleLlmSecretStore(profile);
   assert.ok(store, `Set ${providerApiKeyEnvName(providerId)}; missing live credentials must fail, not skip.`);
@@ -26,7 +27,7 @@ test('Anthropic caching: writes, reads, tool continuation and restored accountin
   const markerCounts: number[] = [];
   const client = await createClientFromProfile(profile, store, { fetch: async (url, init) => {
     assert.ok(markerCounts.length < 6, 'Cache smoke exceeded six provider requests');
-    markerCounts.push(countMarkers(JSON.parse(String(init.body))));
+    markerCounts.push(validateMarkers(JSON.parse(String(init.body)), profile.anthropicCacheTtl));
     const response = await fetch(url, { ...init, signal: AbortSignal.any([t.signal, AbortSignal.timeout(45_000)]) });
     if (!response.ok) {
       await response.body?.cancel();
@@ -46,8 +47,11 @@ test('Anthropic caching: writes, reads, tool continuation and restored accountin
   await conversation.run();
   assertFinish(conversation.state.events, 'CACHE-FIRST-OK');
   assert.equal(records.length, 1, 'First turn should finish in one completion');
-  console.log(JSON.stringify({ phase: 'cold', model: profile.model, cacheMarkers: markerCounts[0], ...records[0] }));
+  console.log(JSON.stringify({ phase: 'cold', model: profile.model, anthropicCacheTtl: profile.anthropicCacheTtl, cacheMarkers: markerCounts[0], ...records[0] }));
   assert.ok(records[0]!.cacheWriteTokens >= 4096, 'Cold Agent request must write the cache, not merely serialize cache_control');
+  if (profile.anthropicCacheTtl === '1h') {
+    assert.ok((records[0]!.cacheWrite1hTokens ?? 0) >= 4096, 'Provider must confirm a one-hour cache write with ephemeral_1h_input_tokens');
+  }
 
   // Includes a completed tool call/result as well as the unchanged system prefix.
   conversation.sendMessage('Call finish with exactly CACHE-SECOND-OK. Do not perform any other work.');
@@ -67,12 +71,15 @@ test('Anthropic caching: writes, reads, tool continuation and restored accountin
   assert.equal(records.length, 3);
   assert.ok(records[2]!.cacheReadTokens >= 4096, 'Restored continuation must reuse cached prefix');
   assert.ok(markerCounts.every(n => n > 0 && n <= 4), 'Every request needs one to four cache breakpoints');
+  if (profile.anthropicCacheTtl === '1h') {
+    for (const record of records) assert.equal(record.cacheWrite1hTokens, record.cacheWriteTokens, 'All writes must use the selected one-hour duration');
+  }
   assertAccounting(restored.state.stats, records);
-  console.log(JSON.stringify({ providerId, model: profile.model, requests: records.length, cacheMarkers: markerCounts,
+  console.log(JSON.stringify({ providerId, model: profile.model, anthropicCacheTtl: profile.anthropicCacheTtl, requests: records.length, cacheMarkers: markerCounts,
     usage: records, accumulated: metricsSnapshot(restored.state.stats).accumulated_token_usage, restore: 'passed' }));
 });
 
-interface Usage { promptTokens: number; completionTokens: number; totalTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
+interface Usage { promptTokens: number; completionTokens: number; totalTokens: number; cacheReadTokens: number; cacheWriteTokens: number; cacheWrite1hTokens: number | null }
 function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -86,11 +93,19 @@ function readUsage(raw: unknown, native: boolean): Usage {
   const cacheWriteTokens = count(usage.cache_creation_input_tokens ?? details.cache_creation_tokens ?? details.cache_write_tokens);
   const promptTokens = native ? count(usage.input_tokens) + cacheReadTokens + cacheWriteTokens : count(usage.prompt_tokens);
   const completionTokens = count(native ? usage.output_tokens : usage.completion_tokens);
-  return { promptTokens, completionTokens, totalTokens: native ? promptTokens + completionTokens : count(usage.total_tokens), cacheReadTokens, cacheWriteTokens };
+  const cacheCreation = object(native ? usage.cache_creation : details.cache_creation_token_details);
+  const cacheWrite1hTokens = cacheCreation.ephemeral_1h_input_tokens === undefined ? null : count(cacheCreation.ephemeral_1h_input_tokens);
+  return { promptTokens, completionTokens, totalTokens: native ? promptTokens + completionTokens : count(usage.total_tokens), cacheReadTokens, cacheWriteTokens, cacheWrite1hTokens };
 }
-function countMarkers(value: unknown): number {
-  if (Array.isArray(value)) return value.reduce((sum, child) => sum + countMarkers(child), 0);
-  return Object.entries(object(value)).reduce((sum, [key, child]) => sum + (key === 'cache_control' ? 1 : 0) + countMarkers(child), 0);
+function validateMarkers(value: unknown, ttl: AnthropicCacheTtl): number {
+  if (Array.isArray(value)) return value.reduce((sum, child) => sum + validateMarkers(child, ttl), 0);
+  return Object.entries(object(value)).reduce((sum, [key, child]) => {
+    if (key === 'cache_control') {
+      assert.deepEqual(child, ttl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' });
+      return sum + 1;
+    }
+    return sum + validateMarkers(child, ttl);
+  }, 0);
 }
 function assertFinish(events: readonly Event[], expected: string): void {
   const last = [...events].reverse().find(event => event.kind === 'ObservationEvent' && event.tool_name === 'finish');

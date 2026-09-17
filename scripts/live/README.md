@@ -56,6 +56,13 @@ Only `finish` is exposed as a tool. Three completions are expected; six requests
 192 output tokens per request, 45 seconds per request and three minutes overall
 are hard limits. Logs contain usage and marker counts, never credentials or text.
 
+`ANTHROPIC_CACHE_TTL` accepts `5m` (local default) or `1h`. Each outgoing marker must
+match that selection. With `1h`, the cold response must report at least 4,096
+`ephemeral_1h_input_tokens`, and every response's one-hour writes must equal its total
+cache writes. This reads native `usage.cache_creation` or the proxy's
+`usage.prompt_tokens_details.cache_creation_token_details`; missing duration counters
+fail rather than inferring one hour from aggregate writes.
+
 For native Anthropic, set `ANTHROPIC_API_KEY` and run:
 
 ```sh
@@ -68,6 +75,7 @@ For the eval-proxy route used by SmolPaws, set `LITELLM_PROXY_API_KEY` and run:
 LLM_PROVIDER_ID=litellm_proxy \
 LLM_MODEL=anthropic/claude-haiku-4-5-20251001 \
 LLM_BASE_URL=https://llm-proxy.eval.all-hands.dev/v1 \
+ANTHROPIC_CACHE_TTL=1h \
 npm run live:anthropic-cache-smoke
 ```
 
@@ -75,7 +83,9 @@ npm run live:anthropic-cache-smoke
 endpoint. The default native model is Haiku 4.5. Missing credentials fail instead
 of skipping. The **Live LLM** workflow also runs this regression from canonical
 `main`, in the **LLM** environment, using secret `LITELLM_PROXY_API_KEY` and optional
-variable `ANTHROPIC_CACHE_MODEL`. It uses Haiku through the eval proxy by default.
+variables `ANTHROPIC_CACHE_MODEL` and `ANTHROPIC_CACHE_TTL`. It uses Haiku through the
+eval proxy with one-hour caching by default; setting the latter variable to `5m`
+selects the backwards-compatible duration.
 Deterministic upstream-derived tests remain the parity evidence; this script proves
 that the real provider accepts the serialized requests and reports cached usage.
 

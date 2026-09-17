@@ -12,6 +12,7 @@ export const openAiApiModeSchema = z.union([z.literal('chat_completions'), z.lit
 export const reasoningEffortSchema = z.union([z.literal('low'), z.literal('medium'), z.literal('high')]);
 export const reasoningSummarySchema = z.union([z.literal('auto'), z.literal('concise'), z.literal('detailed')]);
 export const promptCacheRetentionSchema = z.union([z.literal('24h'), z.literal('disabled')]);
+export const anthropicCacheTtlSchema = z.enum(['5m', '1h']);
 
 export const llmProfileSchema = z
   .object({
@@ -31,6 +32,7 @@ export const llmProfileSchema = z
     reasoningEffort: reasoningEffortSchema.nullable().default(null),
     reasoningSummary: reasoningSummarySchema.nullable().default(null),
     cachingPrompt: z.boolean().default(true),
+    anthropicCacheTtl: anthropicCacheTtlSchema.default('5m'),
     promptCacheRetention: promptCacheRetentionSchema.nullable().default(null),
     promptCacheKey: z.string().min(1).nullable().default(null),
     headers: z.record(z.string(), z.string()).default({}),
@@ -43,6 +45,7 @@ export type OpenAiApiMode = z.infer<typeof openAiApiModeSchema>;
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export type ReasoningSummary = z.infer<typeof reasoningSummarySchema>;
 export type PromptCacheRetention = z.infer<typeof promptCacheRetentionSchema>;
+export type AnthropicCacheTtl = z.infer<typeof anthropicCacheTtlSchema>;
 
 export function resolveLlmProfileApiKeyRef(profile: LLMProfile, store: SecretStore): Promise<SecretRef | null> {
   return resolveLlmApiKeyRef(

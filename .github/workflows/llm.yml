@@ -53,4 +53,5 @@ jobs:
           LITELLM_PROXY_API_KEY: ${{ secrets.LITELLM_PROXY_API_KEY }}
           LLM_PROVIDER_ID: litellm_proxy
           LLM_MODEL: ${{ vars.ANTHROPIC_CACHE_MODEL || 'anthropic/claude-haiku-4-5-20251001' }}
+          ANTHROPIC_CACHE_TTL: ${{ vars.ANTHROPIC_CACHE_TTL || '1h' }}
           LLM_BASE_URL: https://llm-proxy.eval.all-hands.dev/v1
