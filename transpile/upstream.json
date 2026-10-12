@@ -79,7 +79,8 @@
     ".agents/",
     ".github/",
     ".openhands/",
-    ".pr/"
+    ".pr/",
+    "clients/"
   ],
   "ignorePaths": [
     ".dockerignore",
