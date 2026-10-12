@@ -10,7 +10,9 @@
       "reason": "Registers deepseek-v4.1-flash as a verified DeepSeek model in model_features.py (SEND_REASONING_CONTENT_MODELS) and verified_models.py; the TS port owns both the isReasoningModel catalog and the generated verified-models catalog.",
       "policy": null,
       "tracking": [],
-      "evidence": [],
+      "evidence": [
+        "src/llm/__tests__/provider-quirks.test.ts"
+      ],
       "compatibilityConsequence": null,
       "revisitTrigger": null,
       "docsImpact": "none",
