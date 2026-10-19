@@ -1,17 +1,21 @@
 // Generated from pinned Python llm/utils/verified_models.py; run scripts/parity/generate-verified-models.py.
 export const VERIFIED_MODELS_PROVENANCE = {
-  "upstream_commit": "229b2b920d4541eab7a34b051a1f6f2bca5ebabf",
-  "source_sha256": "9a30e3e968a5a2acef7015b79372992aeb1dfbd26312a49089e5b27afa6468df",
+  "upstream_commit": "fd387b58dc7b707b73c159845c0396a17000be24",
+  "source_sha256": "b4cd26bbba23906a0b9937f7a1aaf8c5589cbf9e0a586972d58c65631402ffe4",
   "litellm_version": "1.93.0",
   "model_map_sha256": "cc1955f7f1cdc2cdd9ebf216e7eebbc90bbb3528b62439327f7e8b893eda7c12",
   "openrouter_routes_missing_from_locked_map": [
     "anthropic/claude-opus-5",
+    "anthropic/claude-sonnet-5.5",
     "anthropic/claude-sonnet-5",
+    "anthropic/claude-haiku-5.5",
+    "openai/gpt-6.1-sol",
     "openai/gpt-6-astra",
     "openai/gpt-5.6-sol",
     "openai/gpt-5.3-codex",
     "deepseek/deepseek-v4-pro",
     "deepseek/deepseek-v4-flash",
+    "google/gemini-4-argon",
     "google/gemini-3.8-flash",
     "google/gemini-3.7-flash",
     "google/gemini-3.5-flash-lite",
@@ -25,6 +29,7 @@ export const VERIFIED_MODELS_PROVENANCE = {
 } as const;
 
 export const VERIFIED_OPENAI_MODELS = [
+  "gpt-6.1-sol",
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-6-astra",
@@ -39,8 +44,9 @@ export const VERIFIED_OPENAI_MODELS = [
 export const VERIFIED_ANTHROPIC_MODELS = [
   "claude-opus-5-5",
   "claude-opus-5",
+  "claude-sonnet-5-5",
   "claude-sonnet-5",
-  "claude-sonnet-4-6",
+  "claude-haiku-5-5",
   "claude-haiku-4-5-20251001",
   "claude-fable-5-1",
   "claude-fable-5"
@@ -52,6 +58,7 @@ export const VERIFIED_MISTRAL_MODELS = [
 ] as const;
 
 export const VERIFIED_GEMINI_MODELS = [
+  "gemini-4-argon",
   "gemini-3.1-pro",
   "gemini-3.1-pro-preview",
   "gemini-3.8-flash",
@@ -109,8 +116,11 @@ export const VERIFIED_QWEN_MODELS = [
 
 export const VERIFIED_OPENROUTER_MODELS = [
   "anthropic/claude-opus-5",
+  "anthropic/claude-sonnet-5.5",
   "anthropic/claude-sonnet-5",
+  "anthropic/claude-haiku-5.5",
   "anthropic/claude-haiku-4.5",
+  "openai/gpt-6.1-sol",
   "openai/gpt-6-astra",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.3-codex",
@@ -118,6 +128,7 @@ export const VERIFIED_OPENROUTER_MODELS = [
   "deepseek/deepseek-chat",
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v4-flash",
+  "google/gemini-4-argon",
   "google/gemini-3.1-pro-preview",
   "google/gemini-3.8-flash",
   "google/gemini-3.7-flash",
@@ -131,13 +142,29 @@ export const VERIFIED_OPENROUTER_MODELS = [
   "minimax/minimax-m3"
 ] as const;
 
+export const VERIFIED_DIGITALOCEAN_MODELS = [
+  "anthropic-claude-opus-5.5",
+  "anthropic-claude-opus-5",
+  "anthropic-claude-sonnet-5.5",
+  "anthropic-claude-5-sonnet",
+  "openai-gpt-5.6-sol",
+  "openai-gpt-5.6-terra",
+  "openai-gpt-5.6-luna",
+  "deepseek-v4-pro",
+  "glm-5.3",
+  "glm-5.2",
+  "kimi-k3",
+  "qwen3.8-max"
+] as const;
+
 export const VERIFIED_OPENHANDS_MODELS = [
   "claude-opus-5-5",
   "claude-opus-5",
+  "claude-sonnet-5-5",
   "claude-sonnet-5",
-  "claude-sonnet-4-6",
   "claude-fable-5-1",
   "claude-fable-5",
+  "gpt-6.1-sol",
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-6-astra",
@@ -185,10 +212,11 @@ export const VERIFIED_MODELS = {
   "openhands": [
     "claude-opus-5-5",
     "claude-opus-5",
+    "claude-sonnet-5-5",
     "claude-sonnet-5",
-    "claude-sonnet-4-6",
     "claude-fable-5-1",
     "claude-fable-5",
+    "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-6-astra",
@@ -234,13 +262,15 @@ export const VERIFIED_MODELS = {
   "anthropic": [
     "claude-opus-5-5",
     "claude-opus-5",
+    "claude-sonnet-5-5",
     "claude-sonnet-5",
-    "claude-sonnet-4-6",
+    "claude-haiku-5-5",
     "claude-haiku-4-5-20251001",
     "claude-fable-5-1",
     "claude-fable-5"
   ],
   "openai": [
+    "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-6-astra",
@@ -256,6 +286,7 @@ export const VERIFIED_MODELS = {
     "devstral-medium-2512"
   ],
   "gemini": [
+    "gemini-4-argon",
     "gemini-3.1-pro",
     "gemini-3.1-pro-preview",
     "gemini-3.8-flash",
@@ -306,8 +337,11 @@ export const VERIFIED_MODELS = {
   ],
   "openrouter": [
     "anthropic/claude-opus-5",
+    "anthropic/claude-sonnet-5.5",
     "anthropic/claude-sonnet-5",
+    "anthropic/claude-haiku-5.5",
     "anthropic/claude-haiku-4.5",
+    "openai/gpt-6.1-sol",
     "openai/gpt-6-astra",
     "openai/gpt-5.6-sol",
     "openai/gpt-5.3-codex",
@@ -315,6 +349,7 @@ export const VERIFIED_MODELS = {
     "deepseek/deepseek-chat",
     "deepseek/deepseek-v4-pro",
     "deepseek/deepseek-v4-flash",
+    "google/gemini-4-argon",
     "google/gemini-3.1-pro-preview",
     "google/gemini-3.8-flash",
     "google/gemini-3.7-flash",
@@ -326,6 +361,20 @@ export const VERIFIED_MODELS = {
     "z-ai/glm-5.3-flash",
     "z-ai/glm-5.2",
     "minimax/minimax-m3"
+  ],
+  "digitalocean": [
+    "anthropic-claude-opus-5.5",
+    "anthropic-claude-opus-5",
+    "anthropic-claude-sonnet-5.5",
+    "anthropic-claude-5-sonnet",
+    "openai-gpt-5.6-sol",
+    "openai-gpt-5.6-terra",
+    "openai-gpt-5.6-luna",
+    "deepseek-v4-pro",
+    "glm-5.3",
+    "glm-5.2",
+    "kimi-k3",
+    "qwen3.8-max"
   ]
 } as const;
 

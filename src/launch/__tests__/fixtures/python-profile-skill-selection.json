@@ -1,0 +1,320 @@
+{
+  "upstreamCommit": "fd387b58dc7b707b73c159845c0396a17000be24",
+  "source": "openhands-sdk/openhands/sdk/profiles/resolver.py::_select_skills",
+  "cases": [
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": null,
+      "publicSkillNames": null,
+      "expected": [
+        {
+          "name": "selected",
+          "content": "new"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        }
+      ]
+    },
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": null,
+      "publicSkillNames": [
+        "selected",
+        "other",
+        "blocked"
+      ],
+      "expected": [
+        {
+          "name": "selected",
+          "content": "new"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        }
+      ]
+    },
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": [],
+      "publicSkillNames": null,
+      "expected": []
+    },
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": [],
+      "publicSkillNames": [
+        "selected",
+        "other",
+        "blocked"
+      ],
+      "expected": [
+        {
+          "name": "user",
+          "content": "user"
+        }
+      ]
+    },
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": [
+        "selected"
+      ],
+      "publicSkillNames": null,
+      "expected": [
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ]
+    },
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": [
+        "selected"
+      ],
+      "publicSkillNames": [
+        "selected",
+        "other",
+        "blocked"
+      ],
+      "expected": [
+        {
+          "name": "selected",
+          "content": "new"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        }
+      ]
+    },
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": [
+        "missing"
+      ],
+      "publicSkillNames": null,
+      "expected": []
+    },
+    {
+      "catalog": [
+        {
+          "name": "selected",
+          "content": "old"
+        },
+        {
+          "name": "other",
+          "content": "other"
+        },
+        {
+          "name": "user",
+          "content": "user"
+        },
+        {
+          "name": "blocked",
+          "content": "blocked"
+        },
+        {
+          "name": "selected",
+          "content": "new"
+        }
+      ],
+      "disabled": [
+        "blocked"
+      ],
+      "publicSkills": [
+        "missing"
+      ],
+      "publicSkillNames": [
+        "selected",
+        "other",
+        "blocked"
+      ],
+      "expected": [
+        {
+          "name": "user",
+          "content": "user"
+        }
+      ]
+    }
+  ]
+}

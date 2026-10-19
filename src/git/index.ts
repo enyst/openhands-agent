@@ -83,11 +83,11 @@ export class GitCommandError extends GitError {
 
 export class GitPathError extends GitError {}
 
-export async function runGitCommand(args: readonly string[], options: { readonly cwd?: string | null; readonly timeoutSeconds?: number } = {}): Promise<string> {
+export async function runGitCommand(args: readonly string[], options: { readonly cwd?: string | null; readonly timeoutSeconds?: number; readonly strip?: boolean } = {}): Promise<string> {
   const redactedArgs = args.map(redactUrlCredentials);
   try {
     const { stdout } = await execFileAsync(args[0] ?? 'git', args.slice(1), { cwd: options.cwd ?? undefined, timeout: (options.timeoutSeconds ?? 30) * 1000 });
-    return stdout.trim();
+    return options.strip === false ? stdout : stdout.trim();
   } catch (error) {
     if (isExecError(error)) {
       throw new GitCommandError(`Git command failed: ${redactedArgs.join(' ')}`, redactedArgs, typeof error.code === 'number' ? error.code : -1, redactUrlCredentialsInText(error.stderr ?? '').trim());
@@ -341,9 +341,15 @@ export async function getGitDiff(filePath: string, ref?: string | null): Promise
   const validRepo = await validateGitRepository(repo);
   const base = await getValidRef(validRepo, ref, 'display');
   const relative = toPosixPath(path.slice(validRepo.length + 1));
-  const original = await runGitCommand(['git', 'show', `${base}:${relative}`], { cwd: validRepo }).catch(() => '');
-  const modified = (await readFile(path, 'utf8')).split(/\r?\n/u).join('\n').replace(/\n$/u, '');
+  const original = normalizeDiffLines(await runGitCommand(['git', 'show', `${base}:${relative}`], { cwd: validRepo, strip: false }).catch(() => ''));
+  const modified = normalizeDiffLines(await readFile(path, 'utf8'));
   return { modified, original };
+}
+
+/** Python splitlines() semantics, retaining edge spaces and all but the terminating line break. */
+function normalizeDiffLines(content: string): string {
+  // eslint-disable-next-line no-control-regex
+  return content.replace(/\r\n|[\n\r\v\f\u001c-\u001e\u0085\u2028\u2029]/gu, '\n').replace(/\n$/u, '');
 }
 
 const DEFAULT_COMMIT_LIMIT = 50;
@@ -476,7 +482,9 @@ export function isGitUrl(source: string): boolean {
 
 export function normalizeGitUrl(url: string): string {
   if ((url.startsWith('https://') || url.startsWith('http://')) && !url.endsWith('.git')) {
-    return `${url.replace(/\/+$/u, '')}.git`;
+    const normalized = url.replace(/\/+$/u, '');
+    if (new URL(normalized).pathname.includes('/_git/')) return normalized;
+    return `${normalized}.git`;
   }
   return url;
 }

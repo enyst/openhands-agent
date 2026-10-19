@@ -16,6 +16,8 @@ export function resolveOpenAiApiMode(profile: LLMProfile): OpenAiApiMode {
 
 export function resolveProviderFromProfile(profile: LLMProfile): DetectedLlmProvider {
   const providerId = profile.providerId.toLowerCase();
+  // DigitalOcean's declared route stays OpenAI-compatible even on a custom base URL.
+  if (providerId === 'digitalocean') return 'openai';
   if (isDetectedLlmProvider(providerId)) {
     return providerId;
   }

@@ -5,7 +5,13 @@ import { registerBuiltinResolver, ToolDefinition, toolAnnotationsSchema } from '
 import { NATIVE_TOOL_MODULE_QUALNAMES } from './module-qualnames.js';
 import { TASK_TRACKER_DESCRIPTION } from './task-tracker-description.js';
 
-export const taskItemSchema = z.object({ title: z.string(), notes: z.string().default(''), status: z.enum(['todo', 'in_progress', 'done']).default('todo') });
+const taskStatusSchema = z.preprocess(value => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+  if (['todo', 'in_progress', 'done'].includes(normalized)) return normalized;
+  return ({ pending: 'todo', to_do: 'todo', completed: 'done', complete: 'done' } as Record<string, string>)[normalized] ?? value;
+}, z.enum(['todo', 'in_progress', 'done']));
+export const taskItemSchema = z.object({ title: z.string(), notes: z.string().default(''), status: taskStatusSchema.default('todo') });
 export const taskTrackerActionSchema = z.object({ command: z.enum(['view', 'plan']).default('view'), task_list: z.array(taskItemSchema).default([]) }).strict();
 export const taskTrackerObservationSchema = z.object({ text: z.string(), is_error: z.boolean().default(false), command: z.enum(['view', 'plan']), task_list: z.array(taskItemSchema).default([]) }).strict();
 export type TaskItem = z.infer<typeof taskItemSchema>;
@@ -51,6 +57,7 @@ export class TaskTrackerTool {
   static create(options: { readonly saveDir?: string | null } = {}): ToolDefinition<typeof taskTrackerActionSchema, typeof taskTrackerObservationSchema> {
     const executor = new TaskTrackerExecutor(options);
     return new ToolDefinition({ name: 'task_tracker', description: TASK_TRACKER_DESCRIPTION,
+      conversationLocal: true,
       inputSchema: taskTrackerActionSchema, outputSchema: taskTrackerObservationSchema,
       annotations: toolAnnotationsSchema.parse({ title: 'task_tracker', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }),
       executor: action => executor.execute(action) });
@@ -63,4 +70,4 @@ registerBuiltinResolver('task_tracker', (params, context) => {
   if (Object.keys(params).length > 0) throw new Error('TaskTrackerTool does not accept parameters.');
   const persistenceDir = typeof context === 'object' && context !== null && 'persistenceDir' in context && typeof context.persistenceDir === 'string' ? context.persistenceDir : null;
   return [TaskTrackerTool.create({ saveDir: persistenceDir })];
-}, { canonicalName: 'task_tracker', catalogDescription: 'Keep a running task list to organise multi-step work.', moduleQualname: NATIVE_TOOL_MODULE_QUALNAMES.task_tracker });
+}, { canonicalName: 'task_tracker', conversationLocal: true, catalogDescription: 'Keep a running task list to organise multi-step work.', moduleQualname: NATIVE_TOOL_MODULE_QUALNAMES.task_tracker });

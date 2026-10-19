@@ -17,6 +17,7 @@ import { llmCompletionResponseSchema, llmResponseMetadataSchema, parseLlmRespons
 import {
   contentToString,
   messageSchema,
+  textContent,
   type Content,
   type LLMProfile,
   type Message,
@@ -222,7 +223,7 @@ export function buildChatCompletionsBody(
     requireReasoningContent && message.role === 'assistant' && message.reasoning_content === null
       ? { ...message, reasoning_content: '' } : message);
   const body: Record<string, unknown> = {
-    model: normalizedProfile.model,
+    model: wireModelName(normalizedProfile),
     messages: prepareAnthropicPromptCaching(normalizedProfile, orderCompletedToolResults(history)).map((message) => toOpenAIChatMessage(message, sendReasoningContent)),
   };
   if (tools.length > 0) {
@@ -257,7 +258,7 @@ export function buildOpenAIResponsesBody(
   const parsedMessages = orderCompletedToolResults(messages.map((message) => messageSchema.parse(message)));
   const instructions = parsedMessages.filter((message) => message.role === 'system').flatMap((message) => contentToString(message.content));
   const body: Record<string, unknown> = {
-    model: normalizedProfile.model,
+    model: wireModelName(normalizedProfile),
     input: parsedMessages.filter((message) => message.role !== 'system').flatMap(toOpenAIResponsesInputItems),
     include: ['reasoning.encrypted_content'],
     store: false,
@@ -551,8 +552,8 @@ function parseOpenAIResponsesContent(raw: unknown, metadata: LLMResponseMetadata
     .flatMap((item) => item.content)
     .filter((content): content is OpenAIResponsesOutputText => content.type === 'output_text')
     .map((content) => content.text)
-    .join('\n');
-  const reasoningItem = parsed.output.find((item): item is OpenAIResponsesReasoningItem => item.type === 'reasoning') ?? null;
+    .join('\n').trim();
+  const reasoningItem = parsed.output.filter((item): item is OpenAIResponsesReasoningItem => item.type === 'reasoning').at(-1) ?? null;
   const toolCalls = parsed.output
     .filter((item): item is OpenAIResponsesFunctionCallItem => item.type === 'function_call')
     .map(fromOpenAIResponsesFunctionCall);
@@ -560,7 +561,7 @@ function parseOpenAIResponsesContent(raw: unknown, metadata: LLMResponseMetadata
   return llmCompletionResponseSchema.parse({
     message: {
       role: 'assistant',
-      content: text,
+      content: text ? [textContent(text)] : [],
       tool_calls: toolCalls.length > 0 ? toolCalls : null,
       responses_reasoning_item: reasoningItem === null ? null : {
         id: reasoningItem.id,
@@ -586,22 +587,14 @@ function fromOpenAIResponsesFunctionCall(item: OpenAIResponsesFunctionCallItem):
 }
 
 function normalizeResponsesReasoningSummary(summary: readonly OpenAIResponsesReasoningSummaryItem[]): string[] {
-  return summary.flatMap((item) => (item.text.length === 0 ? [] : [item.text]));
+  return summary.map((item) => item.text);
 }
 
 function normalizeResponsesReasoningContent(content: readonly OpenAIResponsesReasoningContentItem[] | null): string[] | null {
   if (content === null) {
     return null;
   }
-  const values = content.flatMap((item) => {
-    if (item.text !== null && item.text.length > 0) {
-      return [item.text];
-    }
-    if (item.content !== null && item.content.length > 0) {
-      return [item.content];
-    }
-    return [];
-  });
+  const values = content.map((item) => item.text);
   return values.length > 0 ? values : null;
 }
 
@@ -612,10 +605,15 @@ function resolveBaseUrl(profile: LLMProfile): string {
 }
 
 function defaultBaseUrlForProvider(providerId: string): string {
+  if (providerId.toLowerCase() === 'digitalocean') return 'https://inference.do-ai.run/v1';
   if (providerId === 'openrouter') {
     return DEFAULT_OPENROUTER_BASE_URL;
   }
   return DEFAULT_OPENAI_BASE_URL;
+}
+
+function wireModelName(profile: LLMProfile): string {
+  return profile.providerId.toLowerCase() === 'digitalocean' ? profile.model.replace(/^digitalocean\//u, '') : profile.model;
 }
 
 function buildHeaders(profile: LLMProfile, apiKey: string): Readonly<Record<string, string>> {
@@ -691,25 +689,21 @@ const openAIChatCompletionResponseSchema = z
   .passthrough();
 
 const openAIResponsesOutputTextSchema = z.object({ type: z.literal('output_text'), text: z.string() }).passthrough();
-const openAIResponsesContentItemSchema = z.union([openAIResponsesOutputTextSchema, z.object({ type: z.string() }).passthrough()]);
+const openAIResponsesContentItemSchema = openAIResponsesOutputTextSchema;
 const openAIResponsesMessageItemSchema = z
   .object({
     type: z.literal('message'),
-    role: z.literal('assistant').default('assistant'),
     content: z.array(openAIResponsesContentItemSchema).default([]),
   })
   .passthrough();
 const openAIResponsesReasoningSummaryItemSchema = z
   .object({
-    type: z.string().default('summary_text'),
     text: z.string().default(''),
   })
   .passthrough();
 const openAIResponsesReasoningContentItemSchema = z
   .object({
-    type: z.string().default('reasoning_text'),
-    text: z.string().nullable().default(null),
-    content: z.string().nullable().default(null),
+    text: z.string().default(''),
   })
   .passthrough();
 const openAIResponsesReasoningItemSchema = z
@@ -727,16 +721,76 @@ const openAIResponsesFunctionCallItemSchema = z
     type: z.literal('function_call'),
     id: z.string().nullable().default(null),
     call_id: z.string(),
-    name: z.string(),
-    arguments: z.string().default('{}'),
+    name: z.string().default(''),
+    arguments: z.string().default(''),
   })
   .passthrough();
 const openAIResponsesOutputItemSchema = z.union([
   openAIResponsesMessageItemSchema,
   openAIResponsesReasoningItemSchema,
   openAIResponsesFunctionCallItemSchema,
-  z.object({ type: z.string() }).passthrough(),
 ]);
+
+/** Python's typed projection ignores unused kinds but still validates fields it consumes. */
+function normalizeResponsesOutput(value: unknown): unknown {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) return value;
+  return value.flatMap<unknown>((item: unknown) => {
+    if (!isRecord(item)) return [];
+    if (item.type === 'message') {
+      const parts: unknown = item.content ?? [];
+      const content = Array.isArray(parts) ? parts.filter((part: unknown) => isRecord(part) && part.type === 'output_text' && pythonTruthy(part.text)) : parts;
+      return [{ ...item, content }];
+    }
+    if (item.type === 'function_call') {
+      const callId = z.string().nullish().parse(item.call_id);
+      return [{ ...item,
+        call_id: callId || (pythonTruthy(item.id) ? item.id : ''),
+        id: pythonTruthy(item.id) ? pythonItemId(item.id) : null,
+      }];
+    }
+    if (item.type === 'reasoning') return [{ ...item, summary: item.summary ?? [], content: item.content ?? null }];
+    return [];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function pythonTruthy(value: unknown): boolean {
+  if (!value) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return !isRecord(value) || Object.keys(value).length > 0;
+}
+
+function pythonItemId(value: unknown): string {
+  // Generic JSON Responses items may carry a numeric ID while call_id is a string.
+  if (value === true) return 'True';
+  if (value === false) return 'False';
+  if (value === null) return 'None';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value) || isRecord(value)) return pythonJsonRepr(value);
+  return z.string().parse(value);
+}
+
+function pythonJsonRepr(value: unknown): string {
+  if (typeof value === 'string') {
+    const quote = value.includes("'") && !value.includes('"') ? '"' : "'";
+    return quote + Array.from(value, character => {
+      if (character === '\\' || character === quote) return `\\${character}`;
+      if (character === '\n') return '\\n';
+      if (character === '\r') return '\\r';
+      if (character === '\t') return '\\t';
+      if (character.charCodeAt(0) < 32 || character === '\x7f') return `\\x${character.charCodeAt(0).toString(16).padStart(2, '0')}`;
+      return character;
+    }).join('') + quote;
+  }
+  if (Array.isArray(value)) return `[${value.map(pythonJsonRepr).join(', ')}]`;
+  if (isRecord(value)) return `{${Object.entries(value).map(([key, item]) => `${pythonJsonRepr(key)}: ${pythonJsonRepr(item)}`).join(', ')}}`;
+  return pythonItemId(value);
+}
 
 type OpenAIResponsesOutputText = z.infer<typeof openAIResponsesOutputTextSchema>;
 type OpenAIResponsesMessageItem = z.infer<typeof openAIResponsesMessageItemSchema>;
@@ -749,7 +803,7 @@ const openAIResponsesResponseSchema = z
   .object({
     id: z.string().optional(),
     model: z.string().optional(),
-    output: z.array(openAIResponsesOutputItemSchema).default([]),
+    output: z.preprocess(normalizeResponsesOutput, z.array(openAIResponsesOutputItemSchema)),
     usage: z
       .object({
         input_tokens: z.number().int().min(0).optional(),

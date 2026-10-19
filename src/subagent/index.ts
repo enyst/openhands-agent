@@ -1,11 +1,12 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, extname, join, posix, sep } from 'node:path';
+import { parseDocument } from 'yaml';
 
 import { getUserPersistenceDir } from '../utils/index.js';
 
-// Retain permission_mode as a known frontmatter key so legacy agent files load,
-// but do not expose or enforce Python confirmation semantics.
+// Retain permission_mode as passive definition metadata; no confirmation policy
+// is instantiated or enforced by native discovery.
 const knownAgentFields = new Set([
   'name',
   'description',
@@ -17,6 +18,7 @@ const knownAgentFields = new Set([
   'max_budget_per_run',
   'hooks',
   'profile_store_dir',
+  'mcp_config',
   'mcp_servers',
   'permission_mode',
   'condenser',
@@ -41,6 +43,9 @@ export interface AgentDefinitionOptions {
   readonly max_iteration_per_run?: number | null;
   readonly max_budget_per_run?: number | null;
   readonly mcp_servers?: Record<string, unknown> | null;
+  readonly mcp_config?: Record<string, unknown> | null;
+  /** Metadata only; native confirmation execution remains disabled. */
+  readonly permission_mode?: string | null;
   readonly profile_store_dir?: string | null;
   readonly condenser?: unknown;
   readonly metadata?: Record<string, unknown>;
@@ -60,7 +65,8 @@ export class AgentDefinition {
   readonly hooks: unknown;
   readonly max_iteration_per_run: number | null;
   readonly max_budget_per_run: number | null;
-  readonly mcp_servers: Record<string, unknown> | null;
+  readonly mcp_config: Record<string, unknown> | null;
+  readonly permission_mode: string | null;
   readonly profile_store_dir: string | null;
   readonly condenser: unknown;
   readonly metadata: Record<string, unknown>;
@@ -79,12 +85,16 @@ export class AgentDefinition {
     this.hooks = options.hooks ?? null;
     this.max_iteration_per_run = positiveNumberOrNull(options.max_iteration_per_run ?? null, 'max_iteration_per_run');
     this.max_budget_per_run = positiveNumberOrNull(options.max_budget_per_run ?? null, 'max_budget_per_run');
-    this.mcp_servers = options.mcp_servers ?? null;
+    this.mcp_config = normalizeMcpConfig(Object.hasOwn(options, 'mcp_config') ? options.mcp_config : options.mcp_servers);
+    this.permission_mode = permissionMode(options.permission_mode);
     this.profile_store_dir = options.profile_store_dir ?? null;
     this.condenser = options.condenser ?? null;
     this.metadata = { ...(options.metadata ?? {}) };
     this.level = options.level ?? null;
   }
+
+  /** Deprecated read alias; canonical JSON carries mcp_config only. */
+  get mcp_servers(): Record<string, unknown> | null { return this.mcp_config; }
 
   static async load(agentPath: string): Promise<AgentDefinition> {
     const fileContent = await readFile(agentPath, 'utf8');
@@ -102,10 +112,11 @@ export class AgentDefinition {
       skills: stringList(metadata.skills, true),
       max_iteration_per_run: optionalNumber(metadata.max_iteration_per_run),
       max_budget_per_run: optionalNumber(metadata.max_budget_per_run),
-      mcp_servers: recordOrNull(metadata.mcp_servers, 'mcp_servers'),
+      mcp_config: recordOrNull(Object.hasOwn(metadata, 'mcp_config') ? metadata.mcp_config : metadata.mcp_servers, 'mcp_config'),
+      permission_mode: nullableString(metadata.permission_mode),
       profile_store_dir: nullableString(metadata.profile_store_dir),
       hooks: metadata.hooks,
-      condenser: metadata.condenser,
+      condenser: condenserMetadata(metadata.condenser),
       system_prompt: parsed.content.trim(),
       source: toPosixPath(agentPath),
       when_to_use_examples: examplesFrom(description),
@@ -146,12 +157,12 @@ export async function discoverAgents(options: DiscoverAgentsOptions = {}): Promi
   const discovered: AgentDefinition[] = [];
   if (includeProject && options.projectDir !== null && options.projectDir !== undefined) {
     for (const definition of await loadProjectAgents(options.projectDir)) {
-      discovered.push({ ...definition, level: 'project' });
+      discovered.push(new AgentDefinition({ ...definition, level: 'project' }));
     }
   }
   if (includeUser) {
     for (const definition of await loadUserAgents()) {
-      discovered.push({ ...definition, level: 'user' });
+      discovered.push(new AgentDefinition({ ...definition, level: 'user' }));
     }
   }
 
@@ -258,58 +269,18 @@ function resolveAgentDefinition(name: string, description: string | AgentDefinit
 }
 
 function parseFrontmatter(fileContent: string): { metadata: Record<string, unknown>; content: string } {
-  if (!fileContent.startsWith('---')) {
+  const lines = fileContent.replace(/^\uFEFF/u, '').split(/\r?\n/u);
+  if (lines[0]?.trim() !== '---') {
     return { metadata: {}, content: fileContent };
   }
-  const end = fileContent.indexOf('\n---', 3);
+  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---');
   if (end === -1) {
     return { metadata: {}, content: fileContent };
   }
-  return { metadata: parseSimpleYaml(fileContent.slice(3, end)), content: fileContent.slice(end + 4).replace(/^\r?\n/, '') };
-}
-
-function parseSimpleYaml(frontmatter: string): Record<string, unknown> {
-  const metadata: Record<string, unknown> = {};
-  for (const line of frontmatter.split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith('#')) {
-      continue;
-    }
-    const separator = trimmed.indexOf(':');
-    if (separator === -1) {
-      continue;
-    }
-    metadata[trimmed.slice(0, separator).trim()] = parseScalar(trimmed.slice(separator + 1).trim());
-  }
-  return metadata;
-}
-
-function parseScalar(value: string): unknown {
-  const unquoted = stripQuotes(value);
-  if (unquoted === 'true') {
-    return true;
-  }
-  if (unquoted === 'false') {
-    return false;
-  }
-  if (/^-?\d+(?:\.\d+)?$/u.test(unquoted)) {
-    return Number(unquoted);
-  }
-  if (unquoted.startsWith('[') && unquoted.endsWith(']')) {
-    return unquoted.slice(1, -1).split(',').map((part) => part.trim()).filter((part) => part.length > 0);
-  }
-  return unquoted;
-}
-
-function stripQuotes(value: string): string {
-  if (value.length >= 2) {
-    const first = value[0];
-    const last = value.at(-1);
-    if ((first === '"' || first === "'") && first === last) {
-      return value.slice(1, -1);
-    }
-  }
-  return value;
+  const document = parseDocument(lines.slice(1, end).join('\n'), { version: '1.1', uniqueKeys: false });
+  if (document.errors.length || document.warnings.length) throw new Error('Invalid agent frontmatter');
+  const metadata: unknown = document.toJS({ maxAliasCount: 100 });
+  return { metadata: recordOrNull(metadata, 'frontmatter') ?? {}, content: lines.slice(end + 1).join('\n') };
 }
 
 function stringField(value: unknown, fallback: string): string {
@@ -368,6 +339,36 @@ function recordOrNull(value: unknown, field: string): Record<string, unknown> | 
     return value as Record<string, unknown>;
   }
   throw new Error(`${field} must be a mapping`);
+}
+
+function normalizeMcpConfig(value: unknown): Record<string, unknown> | null {
+  const config = recordOrNull(value, 'mcp_config');
+  if (config === null) return null;
+  return Object.fromEntries(Object.entries(config).map(([name, item]) => {
+    const server = recordOrNull(item, 'MCP server');
+    if (server === null) throw new Error('MCP server must be a mapping');
+    if (server.enabled !== undefined && typeof server.enabled !== 'boolean') throw new Error('MCP enabled must be boolean');
+    return [name, { ...structuredClone(server), enabled: server.enabled ?? true }];
+  }));
+}
+
+function permissionMode(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const mode = value.trim().toLowerCase();
+  if (!['always_confirm', 'never_confirm', 'confirm_risky'].includes(mode)) throw new Error('Invalid permission_mode');
+  return mode;
+}
+
+function condenserMetadata(value: unknown): unknown {
+  if (value === null || value === undefined || value === true) return null;
+  if (value === false) return { kind: 'NoOpCondenser' };
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['', 'default', 'inherit'].includes(normalized)) return null;
+    if (['none', 'off', 'false', 'no', 'disable', 'disabled'].includes(normalized)) return { kind: 'NoOpCondenser' };
+    throw new Error('Invalid condenser metadata');
+  }
+  return recordOrNull(value, 'condenser');
 }
 
 function examplesFrom(description: string): string[] {

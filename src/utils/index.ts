@@ -380,17 +380,15 @@ export function redactUrlParams(url: string): string {
 const keyValueSecretPattern = /\b([A-Za-z0-9_.-]*(?:api[_-]?key|authorization|cookie|credential|password|secret|session|token|key)[A-Za-z0-9_.-]*)\s*=\s*("[^"]*"|'[^']*'|[^\s]+)/giu;
 const anthropicKeyPattern = /sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}/gu;
 
-// Dict entries whose key contains a secret-bearing token, e.g. "'api_key': '...'"
-// or "\"UserPassword\": \"...\"". Case-insensitive, matching is_secret_key.
-const singleQuotedDictSecretPattern = /('[A-Za-z_]*(?:KEY|SECRET|TOKEN|PASSWORD)[A-Za-z_]*':\s*')[^']*(')/giu;
-const doubleQuotedDictSecretPattern = /("[A-Za-z_]*(?:KEY|SECRET|TOKEN|PASSWORD)[A-Za-z_]*":\s*")[^"]*(")/giu;
+// Pinned Python quoted-entry matcher: mixed/escaped quotes, Unicode keys and
+// multiline values. The quote pair is retained and public trailing text stays intact.
+const quotedDictSecretPattern = /(?<head>(?<kq>\\?["'])[\p{L}\p{N}_-]*(?:key|secret|token|password|authorization)[\p{L}\p{N}_-]*\k<kq>\s*:\s*)(?<q>\\?["']).*?\k<q>/gisu;
 
 export function redactTextSecrets(text: string): string {
   return redactUrlCredentialsInText(text)
     .replace(anthropicKeyPattern, '<redacted>')
     .replace(keyValueSecretPattern, (_match: string, key: string) => `${key}=<redacted>`)
-    .replace(singleQuotedDictSecretPattern, '$1<redacted>$2')
-    .replace(doubleQuotedDictSecretPattern, '$1<redacted>$2');
+    .replace(quotedDictSecretPattern, '$<head>$<q><redacted>$<q>');
 }
 
 export function utcNow(): Date {

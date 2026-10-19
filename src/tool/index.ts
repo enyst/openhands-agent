@@ -39,6 +39,8 @@ export interface ToolDefinitionOptions<TInputSchema extends z.ZodType = z.ZodTyp
   readonly annotations?: ToolAnnotations;
   readonly meta?: JsonObject;
   readonly usable?: boolean;
+  /** The implementation accesses only its own conversation's state. */
+  readonly conversationLocal?: boolean;
   /** Runtime prompt text; excluded from tool wire schemas and JSON persistence. */
   readonly promptGuidance?: string | null;
 }
@@ -69,6 +71,7 @@ export class ToolDefinition<TInputSchema extends z.ZodType = z.ZodType, TOutputS
   readonly annotations: ToolAnnotations | undefined;
   readonly meta: JsonObject | undefined;
   readonly usable: boolean;
+  declare readonly conversationLocal: boolean;
   declare readonly promptGuidance: string | null;
 
   constructor(options: ToolDefinitionOptions<TInputSchema, TOutputSchema>) {
@@ -80,6 +83,7 @@ export class ToolDefinition<TInputSchema extends z.ZodType = z.ZodType, TOutputS
     this.annotations = options.annotations;
     this.meta = options.meta;
     this.usable = options.usable ?? true;
+    Object.defineProperty(this, 'conversationLocal', { value: options.conversationLocal ?? false, enumerable: false });
     Object.defineProperty(this, 'promptGuidance', { value: options.promptGuidance ?? null, enumerable: false });
   }
 
@@ -140,6 +144,7 @@ export interface ToolCatalogMetadata {
   readonly isUsable?: () => boolean;
   /** Trusted protocol provenance for this exact implementation; never imported. */
   readonly moduleQualname?: string;
+  readonly conversationLocal?: boolean;
   /** Marks a registration of the actual builtin, rather than a host override. */
   readonly builtinName?: string;
 }
@@ -215,6 +220,15 @@ export class ToolRegistry {
     }
     return Object.fromEntries(modules);
   }
+  /** Use the effective implementation, without constructing a factory or inheriting a shadowed builtin. */
+  isConversationLocalTool(name: string): boolean {
+    const registered = this.registrations.get(name);
+    if (registered !== undefined) {
+      return registered.metadata.conversationLocal
+        ?? (registered.implementation instanceof ToolDefinition ? registered.implementation.conversationLocal : false);
+    }
+    return builtinToolResolvers.get(name)?.metadata.conversationLocal ?? false;
+  }
   listUsableTools(): readonly string[] {
     return [...this.registrations.keys()].filter(name => this.isToolAvailable(name));
   }
@@ -277,6 +291,10 @@ export function listRegisteredTools(): readonly string[] {
 
 export function getToolModuleQualnames(names?: readonly string[]): Readonly<Record<string, string>> {
   return globalToolRegistry.getToolModuleQualnames(names);
+}
+
+export function isConversationLocalTool(name: string): boolean {
+  return globalToolRegistry.isConversationLocalTool(name);
 }
 
 export function listUsableTools(): readonly string[] {

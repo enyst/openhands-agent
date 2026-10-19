@@ -240,6 +240,16 @@ export const resumeTranscriptEventSchema = eventObject({
   transcript: z.array(recordSchema).default([]),
 });
 
+/** Imported analyzer metadata only; native analysis/confirmation execution remains disabled. */
+export const securityAnalysisEventSchema = eventObject({
+  kind: z.literal('SecurityAnalysisEvent').default('SecurityAnalysisEvent'),
+  source: sourceTypeSchema.default('environment'),
+  analyzer: z.string(),
+  policy: z.string(),
+  risks: z.record(z.string(), z.enum(['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH'])),
+  details: z.record(z.string(), recordSchema).default({}),
+});
+
 export const eventSchema = z.discriminatedUnion('kind', [
   tokenEventSchema,
   streamingDeltaEventSchema,
@@ -260,6 +270,7 @@ export const eventSchema = z.discriminatedUnion('kind', [
   acpToolCallEventSchema,
   hookExecutionEventSchema,
   resumeTranscriptEventSchema,
+  securityAnalysisEventSchema,
 ]);
 
 export const llmConvertibleEventSchema = z.discriminatedUnion('kind', [
@@ -274,6 +285,7 @@ export const llmConvertibleEventSchema = z.discriminatedUnion('kind', [
 
 export type SourceType = z.infer<typeof sourceTypeSchema>;
 export type Event = z.infer<typeof eventSchema>;
+export type SecurityAnalysisEvent = z.infer<typeof securityAnalysisEventSchema>;
 export type TokenEvent = z.infer<typeof tokenEventSchema>;
 export type StreamingDeltaEvent = z.infer<typeof streamingDeltaEventSchema>;
 export type ConversationErrorEvent = z.infer<typeof conversationErrorEventSchema>;

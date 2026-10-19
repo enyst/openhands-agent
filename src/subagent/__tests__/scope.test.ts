@@ -9,18 +9,18 @@ describe('bounded sub-agent capability snapshots', () => {
     expect(() => new SubAgentScope({ unknown: true } as never)).toThrow();
     expect(Object.isFrozen(new SubAgentScope())).toBe(true);
   });
-  it('compares canonical tools and exact MCP configuration, sorted', () => {
-    const scope = new SubAgentScope({ tools: true, mcp_servers: true });
+  it('compares canonical tools, ignoring the deprecated MCP scope axis', () => {
+    const scope = new SubAgentScope({ tools: true });
     expect(scope.missingFrom({ tools: ['finish'], mcpConfig: { same: { url: 'a', headers: { X: '1' } } } }, {
       tools: ['FinishTool', 'z', 'a'], mcpConfig: { same: { headers: { X: '2' }, url: 'a' }, other: {} },
-    })).toEqual(['a', 'z', "MCP server 'other'", "MCP server 'same'"]);
+    })).toEqual(['a', 'z']);
     expect(scope.missingFrom({ tools: [], mcpConfig: { same: { a: 1, b: 2 } } }, { tools: [], mcpConfig: { same: { b: 2, a: 1 } } })).toEqual([]);
   });
   it('narrows only delegation tools monotonically without mutating callers', () => {
     const input = [{ name: 'task_tool_set', params: { custom: 1, sub_agent_scope: { tools: true } } }, { name: 'workflow', params: {} }, { name: 'terminal', params: {} }];
-    const scoped = scopeDelegationTools(input, new SubAgentScope({ mcp_servers: true }));
-    expect(scoped[0]?.params).toEqual({ custom: 1, sub_agent_scope: { tools: true, mcp_servers: true } });
-    expect(scoped[1]?.params).toEqual({ sub_agent_scope: { tools: false, mcp_servers: true } });
+    const scoped = scopeDelegationTools(input, new SubAgentScope({ tools: true }));
+    expect(scoped[0]?.params).toEqual({ custom: 1, sub_agent_scope: { tools: true } });
+    expect(scoped[1]?.params).toEqual({ sub_agent_scope: { tools: true } });
     expect(scoped[2]).toBe(input[2]);
     expect(input[0]?.params.sub_agent_scope).toEqual({ tools: true });
   });
