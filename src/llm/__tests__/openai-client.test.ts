@@ -16,6 +16,29 @@ import {
 } from '../openai.js';
 
 describe('profile-resolved OpenAI-compatible chat client', () => {
+  it('forwards Kimi K2.5 reasoning effort through OpenRouter chat completions', async () => {
+    const profile = llmProfileSchema.parse({
+      profileId: 'kimi',
+      providerId: 'openrouter',
+      model: 'moonshotai/kimi-k2.5',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      reasoningEffort: 'high',
+    });
+    const store = new InMemorySecretStore([[llmProviderSecretRef('openrouter'), 'test-key']]);
+    const calls: FakeFetchCall[] = [];
+    const client = await createOpenAIChatClientFromProfile(profile, store, {
+      fetch: fakeFetch({ content: 'ok' }, calls),
+    });
+
+    await client.complete([{ role: 'user', content: [textContent('hello')] }]);
+
+    expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(calls[0]?.body).toMatchObject({
+      model: 'moonshotai/kimi-k2.5',
+      reasoning_effort: 'high',
+    });
+  });
+
   it('resolves provider-scoped keys by providerId, not model family', async () => {
     const profile = llmProfileSchema.parse({
       profileId: 'eval-proxy',
