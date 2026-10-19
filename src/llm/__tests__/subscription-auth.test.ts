@@ -183,7 +183,7 @@ describe('OAuth credentials (Python parity)', () => {
       ],
     ]);
   });
-  it.each(['openai/gpt-5.5', 'gpt-6.1-sol'])('restores %s subscription without API keys and streams with refreshed credentials', async (model) => {
+  it.each(['openai/gpt-5.5', 'gpt-6.1-sol', 'gpt-6-sol', 'openai/gpt-6-luna'])('restores %s subscription without API keys and streams with refreshed credentials', async (model) => {
     const s = store();
     s.save(creds());
     const calls: {

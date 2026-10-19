@@ -6,7 +6,7 @@ import type { LLMClient } from '../llm/client.js';
 import { metaProfileSchema, type MetaProfile } from '../meta-profiles/index.js';
 import { validateAgentProfile, type AgentProfile, type OpenHandsAgentProfile } from '../profiles/index.js';
 import { validateAgentSettings, materializeCondenser, materializeHardCondenser, type OpenHandsAgentSettings } from '../settings/index.js';
-import { Skill } from '../skills/index.js';
+import { Skill, skillSchema } from '../skills/index.js';
 import { SubAgentScope, scopeDelegationTools } from '../subagent/scope.js';
 import { globalToolRegistry, resolveTool, type ToolDefinition, type ToolSpec } from '../tool/index.js';
 import { canonicalToolName, launchToolSpecs, resolveToolSpecs } from '../tool/defaults.js';
@@ -55,6 +55,8 @@ export interface LaunchStores {
   readonly llmProfiles: { load(name: string): Awaitable<LLMProfile | null> };
   readonly mcpConfig: Readonly<Record<string, unknown>>;
   readonly skills: () => Awaitable<readonly Skill[]>;
+  /** Omission treats every catalog entry as public, as in the source resolver. */
+  readonly publicSkillNames?: () => Awaitable<readonly string[]>;
   readonly agentProfiles?: { nameForId(id: string): Awaitable<string | null>; load(name: string): Awaitable<AgentProfile | null> };
   readonly metaProfiles?: { load(name: string): Awaitable<MetaProfile | null> };
   readonly llmProfileNames?: () => Awaitable<readonly string[]>;
@@ -65,6 +67,7 @@ export interface LaunchedAgentProfile {
   readonly agent_profile_id: string;
   readonly revision: number;
   readonly secret_refs: readonly string[] | null;
+  readonly llm_profile_ref?: string | null;
 }
 export type LaunchClientRole = 'main' | 'condenser' | 'hard_condenser';
 export type LaunchLlmBindings = Readonly<Partial<Record<LaunchClientRole, LLMProfile>>>;
@@ -98,7 +101,7 @@ export class ResolvedLaunch {
   get allowedSecrets(): ReadonlySet<string> | null { return (this.profile?.secret_refs === null || this.profile?.secret_refs === undefined) ? null : new Set(this.profile.secret_refs); }
 }
 
-export async function resolveLaunch(source: AgentProfile | string, stores: LaunchStores): Promise<ResolvedLaunch> {
+export async function resolveLaunch(source: AgentProfile | string, stores: LaunchStores, options: { readonly llmProfileRef?: string | null } = {}): Promise<ResolvedLaunch> {
   let loaded: AgentProfile | null;
   if (typeof source === 'string') {
     if (!stores.agentProfiles) throw new ProfileNotFound(`Agent profile with id '${source}' not found`);
@@ -112,15 +115,17 @@ export async function resolveLaunch(source: AgentProfile | string, stores: Launc
   if (profile.agent_kind !== 'openhands') throw new AgentLaunchError('ACP execution is not supported by the native launch runtime (DEV-SDK-005).');
   const mcp = filterMcp(stores.mcpConfig, profile.mcp_server_refs);
   const catalog = await loadSkills(stores);
-  const context: AgentContextOptions = { skills: deduplicateSkills(catalog, profile.disabled_skills), disabledSkills: profile.disabled_skills,
+  const context: AgentContextOptions = { skills: selectProfileSkills(catalog, profile, await loadPublicSkillNames(profile, stores)), disabledSkills: profile.disabled_skills,
     systemMessageSuffix: profile.system_message_suffix };
-  const settings = validateAgentSettings({ llm_profile_ref: profile.llm_profile_ref, agent: profile.agent,
-    tools: profile.tools === null ? null : scopeDelegationTools(profile.tools, new SubAgentScope({ tools: true, mcp_servers: profile.mcp_server_refs !== null })),
+  if (options.llmProfileRef !== undefined && options.llmProfileRef !== null && options.llmProfileRef.length === 0) throw new AgentLaunchError('llmProfileRef must not be empty');
+  const settings = validateAgentSettings({ llm_profile_ref: options.llmProfileRef ?? profile.llm_profile_ref, agent: profile.agent,
+    tools: profile.tools === null ? null : scopeDelegationTools(profile.tools, new SubAgentScope({ tools: true })),
     persona: profile.persona, mcp_config: mcp.config, condenser: profile.condenser, verification: profile.verification,
+    ...(profile.hard_condenser === undefined ? {} : { hard_condenser: profile.hard_condenser }),
     enable_classify_and_switch_llm_tool: profile.enable_classify_and_switch_llm_tool, active_meta_profile: profile.meta_profile_ref,
     tool_concurrency_limit: profile.tool_concurrency_limit });
   if (settings.agent_kind !== 'openhands') throw new AgentLaunchError('Invalid native settings');
-  return resolveSettings(settings, stores, context, { agent_profile_id: profile.id, revision: profile.revision, secret_refs: profile.secret_refs }, mcp.dangling);
+  return resolveSettings(settings, stores, context, { agent_profile_id: profile.id, revision: profile.revision, secret_refs: profile.secret_refs, llm_profile_ref: options.llmProfileRef ?? null }, mcp.dangling);
 }
 
 /** Settings-based callers enter the same snapshot/finalize pipeline as profiles. */
@@ -212,10 +217,16 @@ function filterMcp(config: Readonly<Record<string, unknown>>, refs: readonly str
   const names = refs === null ? Object.keys(config) : [...new Set(refs)];
   return { config: Object.fromEntries(names.filter(name => Object.hasOwn(config, name)).map(name => [name, copy(config[name])])), dangling: names.filter(name => !Object.hasOwn(config, name)) };
 }
-function deduplicateSkills(skills: readonly Skill[], disabled: readonly string[]): Skill[] {
+async function loadPublicSkillNames(profile: OpenHandsAgentProfile, stores: LaunchStores): Promise<readonly string[] | null> {
+  if (profile.public_skills === null || stores.publicSkillNames === undefined) return null;
+  try { return [...await stores.publicSkillNames()]; }
+  catch { throw new LaunchStoreError('Skill discovery failed'); }
+}
+function selectProfileSkills(skills: readonly Skill[], profile: OpenHandsAgentProfile, publicNames: readonly string[] | null): Skill[] {
   const selected = new Map<string, Skill>();
   for (const skill of skills) selected.set(skill.name, cloneSkill(skill));
-  return [...selected.values()].filter(skill => !disabled.includes(skill.name));
+  return [...selected.values()].filter(skill => !profile.disabled_skills.includes(skill.name)
+    && (profile.public_skills === null || profile.public_skills.includes(skill.name) || (publicNames !== null && !publicNames.includes(skill.name))));
 }
 
 export interface LaunchToolContext {
@@ -233,7 +244,11 @@ export interface LaunchRuntime {
   readonly loadMemory?: () => Awaitable<string | null>;
   readonly apiKeyAvailable?: (profile: LLMProfile) => Awaitable<boolean>;
 }
-export const agentLaunchAdditionsSchema = z.object({ system_message_suffix_append: z.string().max(32768).nullable().default(null) }).strict();
+export const agentLaunchAdditionsSchema = z.object({
+  system_message_suffix_append: z.string().max(32768).nullable().default(null),
+  skills: z.array(z.union([z.instanceof(Skill), skillSchema])).nullable().optional(),
+  llm_profile_ref: z.string().min(1).nullable().default(null),
+}).strict();
 export type AgentLaunchAdditions = z.input<typeof agentLaunchAdditionsSchema>;
 export interface FinalizeLaunchOptions {
   readonly additions?: AgentLaunchAdditions | null;
@@ -307,6 +322,13 @@ export async function finalizeLaunch(source: ResolvedLaunch | Agent, runtime: La
     const current = ensureContext();
     context = cloneContext({ ...current, systemMessageSuffix: [current.systemMessageSuffix?.trim(), suffix.trim()].filter(Boolean).join('\n\n') });
   }
+  if (additions?.skills?.length) {
+    const current = ensureContext();
+    const taken = new Set([...current.skills.map(skill => skill.name), ...current.disabledSkills]);
+    const added: Skill[] = [];
+    for (const skill of additions.skills) if (!taken.has(skill.name)) { taken.add(skill.name); added.push(cloneSkill(skill)); }
+    if (added.length) context = cloneContext({ ...current, skills: [...current.skills, ...added] });
+  }
   if (context?.secrets !== null && context?.secrets !== undefined) {
     const excluded = new Set(options.managedSecrets ?? []);
     const allowed = source instanceof ResolvedLaunch ? source.allowedSecrets : null;
@@ -371,7 +393,7 @@ export async function previewLaunch(source: OpenHandsAgentProfile | AgentProfile
           const main = await loadLlm(stores, native.llm_profile_ref);
           diagnostics.llm_profile_resolved = main !== null;
           if (main !== null) diagnostics.llm_api_key_set = await runtime.apiKeyAvailable?.(copy(main)) ?? false;
-          diagnostics.resolved_skills = deduplicateSkills(await loadSkills(stores), native.disabled_skills).map(skill => skill.name);
+          diagnostics.resolved_skills = selectProfileSkills(await loadSkills(stores), native, await loadPublicSkillNames(native, stores)).map(skill => skill.name);
         } catch { /* Keep the original structured dangling-reference result. */ }
       }
     } else diagnostics.errors.push(error instanceof AgentLaunchError || error instanceof LaunchStoreError ? error.message : 'Agent launch failed');
@@ -379,12 +401,14 @@ export async function previewLaunch(source: OpenHandsAgentProfile | AgentProfile
   return diagnostics;
 }
 
-export type NormalizedLaunchSource = { readonly kind: 'agent'; readonly agent: Agent } | { readonly kind: 'profile'; readonly id: string } | { readonly kind: 'settings'; readonly settings: unknown };
-export function normalizeLaunchSource(input: { readonly agent?: Agent | null; readonly agentSettings?: unknown; readonly agentProfileId?: string | null }): NormalizedLaunchSource {
+export type NormalizedLaunchSource = { readonly kind: 'agent'; readonly agent: Agent } | { readonly kind: 'profile'; readonly id: string; readonly llmProfileRef?: string } | { readonly kind: 'settings'; readonly settings: unknown };
+export function normalizeLaunchSource(input: { readonly agent?: Agent | null; readonly agentSettings?: unknown; readonly agentProfileId?: string | null; readonly agentLaunchAdditions?: AgentLaunchAdditions | null }): NormalizedLaunchSource {
+  const override = (input.agentLaunchAdditions === null || input.agentLaunchAdditions === undefined) ? null : agentLaunchAdditionsSchema.parse(input.agentLaunchAdditions).llm_profile_ref;
+  if (override !== null && (input.agentProfileId === null || input.agentProfileId === undefined)) throw new AgentLaunchError('A per-launch LLM profile requires agentProfileId');
   if ((input.agentProfileId !== null && input.agentProfileId !== undefined)) {
     if ((input.agent !== null && input.agent !== undefined) || (input.agentSettings !== null && input.agentSettings !== undefined)) throw new AgentLaunchError('agentProfileId is mutually exclusive with agent and agentSettings');
     if (!input.agentProfileId.trim()) throw new AgentLaunchError('agentProfileId must not be empty');
-    return { kind: 'profile', id: input.agentProfileId };
+    return { kind: 'profile', id: input.agentProfileId, ...(override === null ? {} : { llmProfileRef: override }) };
   }
   if ((input.agent !== null && input.agent !== undefined)) return { kind: 'agent', agent: input.agent };
   if ((input.agentSettings !== null && input.agentSettings !== undefined)) return { kind: 'settings', settings: input.agentSettings };

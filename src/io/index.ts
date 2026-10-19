@@ -5,6 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { toPosixPath } from '../utils/index.js';
+import { atomicWriteText } from '../utils/files.js';
 
 export interface FileStoreLockOptions {
   readonly timeoutSeconds?: number;
@@ -166,7 +167,7 @@ export class LocalFileStore implements FileStore {
     const fullPath = this.getFullPath(filePath);
     mkdirSync(path.dirname(fullPath), { recursive: true });
     if (typeof contents === 'string') {
-      writeFileSync(fullPath, contents, 'utf8');
+      atomicWriteText(fullPath, contents);
       this.cache.set(fullPath, contents);
     } else {
       writeFileSync(fullPath, contents);

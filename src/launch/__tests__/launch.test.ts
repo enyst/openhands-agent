@@ -113,7 +113,7 @@ describe('reference-free native launch', () => {
   });
   it('marks selected delegation tools with the profile scope', async () => {
     const resolved = await resolveLaunch(profile({ tools: [{ name: 'task_tool_set' }], mcp_server_refs: [] }), stores());
-    expect(resolved.settings.tools?.[0]?.params).toEqual({ sub_agent_scope: { tools: true, mcp_servers: true } });
+    expect(resolved.settings.tools?.[0]?.params).toEqual({ sub_agent_scope: { tools: true } });
   });
 });
 

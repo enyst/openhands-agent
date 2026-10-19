@@ -321,6 +321,13 @@ retry/scaling settings (defaults five attempts and 0.8). Ordinary `max_tokens`,
 Null disables it; omission stays absent through persistence. The additive optional
 field does not bump the agent-settings schema version.
 
+Agent Profiles may carry the same optional `hard_condenser` configuration. Default
+profile seeding and launch preserve it independently from the main LLM selection;
+a per-launch main-profile override never replaces the emergency summarizer binding.
+Omission remains absent, null stays disabled, and enabling it still requires agent
+reset mode. This preserves the existing extension through the profile boundary
+without changing the profile schema version.
+
 Keep tool/schema/reset helpers in their own target-only modules. Changes to the
 shared runtime, event replay and host operation are governed by DEV-SDK-012, not
 exempted from compatibility review by this extension. Product profile storage,

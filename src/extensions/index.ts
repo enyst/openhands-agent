@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
@@ -11,6 +11,7 @@ export type ExtensionSourceType = 'local' | 'git' | 'github';
 export interface ParsedExtensionSource {
   readonly type: ExtensionSourceType;
   readonly url: string;
+  readonly repoPath?: string;
 }
 
 export class ExtensionFetchError extends Error {}
@@ -18,11 +19,12 @@ export class ExtensionFetchError extends Error {}
 export function parseExtensionSource(source: string): ParsedExtensionSource {
   const value = source.trim();
   if (value.startsWith('github:')) {
-    const repo = value.slice('github:'.length);
-    if (!/^[\w.-]+\/[\w.-]+$/u.test(repo)) {
+    const [owner, repository, ...parts] = value.slice('github:'.length).split('/');
+    if (!owner || !repository || !/^[\w.-]+$/u.test(owner) || !/^[\w.-]+$/u.test(repository)) {
       throw new ExtensionFetchError(`Invalid GitHub shorthand format: ${value}. Expected format: github:owner/repo`);
     }
-    return { type: 'github', url: `https://github.com/${repo}.git` };
+    const repoPath = parts.join('/').replace(/^\/+|\/+$/gu, '');
+    return { type: 'github', url: `https://github.com/${owner}/${repository.replace(/\.git$/u, '')}.git`, ...(repoPath ? { repoPath } : {}) };
   }
   if (isGitUrl(value)) {
     return { type: 'git', url: normalizeGitUrl(value) };
@@ -44,7 +46,8 @@ export interface FetchOptions {
   readonly ref?: string | null;
   readonly update?: boolean;
   readonly repoPath?: string | null;
-  readonly gitFetcher?: (url: string, destination: string, options: { readonly ref: string | null; readonly update: boolean }) => Promise<string | null>;
+  readonly strict?: boolean;
+  readonly gitFetcher?: (url: string, destination: string, options: { readonly ref: string | null; readonly update: boolean; readonly strict?: boolean }) => Promise<string | null>;
 }
 
 export interface FetchResolution {
@@ -54,17 +57,19 @@ export interface FetchResolution {
 
 export async function fetchWithResolution(source: string, cacheDir: string, options: FetchOptions = {}): Promise<FetchResolution> {
   const parsed = parseExtensionSource(source);
+  if (parsed.repoPath && options.repoPath) throw new ExtensionFetchError('GitHub shorthand subpath cannot be combined with repoPath');
+  const repoPath = parsed.repoPath ?? options.repoPath ?? null;
   if (parsed.type === 'local') {
     const basePath = await resolveLocalSource(parsed.url);
-    return { path: await applySubpath(basePath, options.repoPath ?? null, `local source '${source}'`), resolvedRef: null };
+    return { path: await applySubpath(basePath, repoPath, `local source '${source}'`), resolvedRef: null };
   }
   if (options.gitFetcher === undefined) {
     throw new ExtensionFetchError('Git extension fetching requires an explicit gitFetcher in the TypeScript package');
   }
   await mkdir(cacheDir, { recursive: true });
   const cachePath = getCachePath(source, cacheDir);
-  const resolvedRef = await options.gitFetcher(parsed.url, cachePath, { ref: options.ref ?? null, update: options.update ?? true });
-  return { path: await applySubpath(cachePath, options.repoPath ?? null, 'extension repository'), resolvedRef };
+  const resolvedRef = await options.gitFetcher(parsed.url, cachePath, { ref: options.ref ?? null, update: options.update ?? true, ...(options.strict === undefined ? {} : { strict: options.strict }) });
+  return { path: await applySubpath(cachePath, repoPath, 'extension repository'), resolvedRef };
 }
 
 export async function fetchExtension(source: string, cacheDir: string, options: FetchOptions = {}): Promise<string> {
@@ -252,6 +257,8 @@ async function applySubpath(basePath: string, subpath: string | null, context: s
   if (!(await exists(finalPath))) {
     throw new ExtensionFetchError(`Subdirectory '${subpath}' not found in ${context}`);
   }
+  const physicalRelative = relative(await realpath(basePath), await realpath(finalPath));
+  if (physicalRelative === '..' || physicalRelative.startsWith(`..${sep}`)) throw new ExtensionFetchError(`Subdirectory '${subpath}' escapes ${context}`);
   return finalPath;
 }
 

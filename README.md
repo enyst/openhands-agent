@@ -12,6 +12,10 @@ Intentional policy differences are small and explicit in the transpilation contr
 
 The SDK and TypeScript agent-server advance against the same pinned upstream commit in bounded `OLD_PIN..NEW_PIN` batches. Upstream changes are generated into review units before coding and compatibility work remains tests-first/red-green.
 
+The [v1.53–v1.55 review](transpile/updates/229b2b92..fd387b58.json) records the remaining in-scope gaps explicitly: owned MCP HTTP recovery, skill-aware sub-agent registration and local forks, executable parent-scope inheritance, critic/`invoke_skill` launch lifecycles, and generic extension installation. Their metadata and helper ports do not establish executable support. Live AWS/provider-connection discovery and the broader file codec/detector gaps also remain tracked from earlier batches.
+
+Profile launches support public-skill selection, additional launch skills and a named main-model override while retaining separate condenser bindings. `loadUserSkills` keeps installed resources out of user scans; `loadPublicSkills` honors the default catalog's local `EXTENSIONS_PATH`, and `syncPublicSkills` reports actual Git fetch failures. The default Git adapter owns disposable cache checkouts and may reset cached branches; do not point it at a working source checkout.
+
 ## Main surfaces
 
 - zod-backed events, messages, tools, settings, profiles, and serialization

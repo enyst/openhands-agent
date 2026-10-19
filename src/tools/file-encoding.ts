@@ -10,7 +10,7 @@ export interface FileEncodingGuess {
   readonly confidence: number | null;
 }
 export type FileEncodingDetector = (sample: Uint8Array) => FileEncodingGuess | null | Promise<FileEncodingGuess | null>;
-export type FileTextEncoding = 'utf-8' | 'cp1252' | 'latin-1' | 'cp1251';
+export type FileTextEncoding = 'utf-8' | 'utf-8-sig' | 'cp1252' | 'latin-1' | 'cp1251';
 export interface EncodedTextFile {
   readonly text: string;
   readonly bytes: Buffer;
@@ -72,15 +72,15 @@ function invalidByte(encoding: FileTextEncoding, byte: number): boolean {
 function decode(bytes: Uint8Array, encoding: FileTextEncoding): string {
   // WHATWG latin1 is an alias of Windows-1252, unlike Python's Latin-1.
   if (encoding === 'latin-1') return Buffer.from(bytes).toString('latin1');
-  if (encoding !== 'utf-8') {
+  if (encoding !== 'utf-8' && encoding !== 'utf-8-sig') {
     for (const byte of bytes) if (invalidByte(encoding, byte)) throw new Error(`Invalid byte for ${encoding}`);
   }
-  // Keep a UTF-8 BOM in the string so edits do not silently remove it.
-  return new TextDecoder(encoding === 'utf-8' ? 'utf-8' : encoding === 'cp1251' ? 'windows-1251' : 'windows-1252', { fatal: true, ignoreBOM: true }).decode(bytes);
+  // UTF-8-sig strips the marker on reads and reinstates it on writes.
+  return new TextDecoder(encoding.startsWith('utf-8') ? 'utf-8' : encoding === 'cp1251' ? 'windows-1251' : 'windows-1252', { fatal: true, ignoreBOM: encoding !== 'utf-8-sig' }).decode(bytes);
 }
 
 const encodingTables = new Map<FileTextEncoding, ReadonlyMap<string, number>>();
-function encodingTable(encoding: Exclude<FileTextEncoding, 'utf-8'>): ReadonlyMap<string, number> {
+function encodingTable(encoding: Exclude<FileTextEncoding, 'utf-8' | 'utf-8-sig'>): ReadonlyMap<string, number> {
   const cached = encodingTables.get(encoding);
   if (cached) return cached;
   const table = new Map<string, number>();
@@ -93,6 +93,7 @@ function encodingTable(encoding: Exclude<FileTextEncoding, 'utf-8'>): ReadonlyMa
 
 function encode(text: string, encoding: FileTextEncoding): Buffer | null {
   if (encoding === 'utf-8') return Buffer.from(text, 'utf8');
+  if (encoding === 'utf-8-sig') return Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, 'utf8')]);
   const table = encodingTable(encoding);
   const bytes: number[] = [];
   for (const character of text) {
@@ -124,14 +125,26 @@ export class FileEncodingManager {
     if (cached?.fingerprint === digest) {
       encoding = cached.encoding;
     } else {
-      const guess = await this.detector(bytes.subarray(0, MAX_SAMPLE_BYTES));
-      encoding = guess?.encoding && (guess.confidence ?? 0) > 0.9 ? primaryEncoding(guess.encoding) : 'utf-8';
+      const sample = bytes.subarray(0, MAX_SAMPLE_BYTES);
+      let guess: FileEncodingGuess | null = null;
+      if (sample[0] === 0xef && sample[1] === 0xbb && sample[2] === 0xbf) encoding = 'utf-8-sig';
+      else {
+        try { decode(sample, 'utf-8'); encoding = 'utf-8'; }
+        catch {
+          guess = await this.detector(sample);
+          encoding = guess?.encoding && (guess.confidence ?? 0) > 0.9 ? primaryEncoding(guess.encoding) : 'utf-8';
+        }
+      }
       if (encoding === 'utf-8') {
+        let cleanUtf8 = false;
+        try { cleanUtf8 = !BINARY_CONTROL_CHARS.test(decode(bytes, 'utf-8')); }
+        catch { /* Recovery below considers the whole file. */ }
+        if (!cleanUtf8 && guess === null) guess = await this.detector(sample);
         if (recognizedUnsupportedEncoding(guess?.encoding)) {
           try { decode(bytes, 'utf-8'); }
           catch { throw new Error(`Unsupported detected text encoding: ${guess!.encoding}`); }
         }
-        const candidates = new Set([recoveryGuess(guess?.encoding), ...TEXT_DECODE_CANDIDATES]);
+        const candidates = new Set(['utf-8' as const, recoveryGuess(guess?.encoding), ...TEXT_DECODE_CANDIDATES]);
         for (const candidate of candidates) {
           if (candidate === null) continue;
           try {

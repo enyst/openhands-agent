@@ -8,6 +8,16 @@ import {
 } from '../index.js';
 
 describe('AgentProfile schemas', () => {
+  it('preserves public-skill selection without changing schema versions or ACP fields', () => {
+    for (const public_skills of [null, [], ['git', 'missing']]) {
+      const parsed = validateAgentProfile({ name: 'selection', llm_profile_ref: 'main', public_skills });
+      expect(parsed).toMatchObject({ schema_version: 3, public_skills });
+      expect(validateAgentProfile(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+    }
+    expect(validateAgentProfile({ name: 'all', llm_profile_ref: 'main' })).toMatchObject({ public_skills: null });
+    expect(() => validateAgentProfile({ agent_kind: 'acp', name: 'acp', public_skills: [] })).toThrow();
+    expect(() => validateAgentProfile({ name: 'bad', llm_profile_ref: 'main', public_skills: [1] })).toThrow();
+  });
   it('round-trips an OpenHands agent profile', () => {
     const profile = openHandsAgentProfileSchema.parse({
       name: 'my-openhands',

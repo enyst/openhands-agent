@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { foldDeprecatedToolSwitches, foldRetiredToolSwitches } from '../tool/defaults.js';
 import { persistedToolSpecsSchema } from '../tool/spec-validation.js';
+import { condenserSettingsSchema, hardCondenserSettingsSchema } from '../settings/condenser-settings.js';
 
 export const AGENT_PROFILE_SCHEMA_VERSION = 3;
 
@@ -46,13 +47,22 @@ const openHandsAgentProfileObjectSchema = z
     persona: z.string().min(1).max(65536).nullable().default(null),
     system_message_suffix: z.string().nullable().default(null),
     disabled_skills: z.array(z.string()).default([]),
+    public_skills: z.array(z.string()).nullable().default(null),
     condenser: z.unknown().default({ condenser_kind: 'llm_summarizing', enabled: true }),
+    hard_condenser: hardCondenserSettingsSchema.nullable().optional(),
     verification: profileVerificationSettingsSchema.default(defaultProfileVerificationSettings),
     enable_classify_and_switch_llm_tool: z.boolean().default(false),
     meta_profile_ref: z.string().min(1).nullable().default(null),
     tool_concurrency_limit: z.number().int().min(1).default(1),
   })
-  .strict();
+  .strict()
+  .superRefine((profile, context) => {
+    if (profile.hard_condenser === undefined || profile.hard_condenser === null) return;
+    const condenser = condenserSettingsSchema.safeParse(profile.condenser);
+    if (!condenser.success || condenser.data.condenser_kind !== 'agent_reset' || !condenser.data.enabled) {
+      context.addIssue({ code: 'custom', path: ['hard_condenser'], message: 'hard_condenser requires an enabled agent_reset condenser' });
+    }
+  });
 
 export const openHandsAgentProfileSchema = z.preprocess(foldDeprecatedToolSwitches, openHandsAgentProfileObjectSchema);
 

@@ -19,7 +19,7 @@ describe('extension fetch utilities', () => {
     expect(parseExtensionSource(' github:owner/repo ')).toEqual({ type: 'github', url: 'https://github.com/owner/repo.git' });
     expect(parseExtensionSource('https://gitlab.com/org/repo')).toEqual({ type: 'git', url: 'https://gitlab.com/org/repo.git' });
     expect(parseExtensionSource('./local-extension')).toEqual({ type: 'local', url: './local-extension' });
-    expect(() => parseExtensionSource('github:too/many/parts')).toThrow(ExtensionFetchError);
+    expect(() => parseExtensionSource('github:missing-repository')).toThrow(ExtensionFetchError);
   });
 
   it('returns deterministic cache paths and resolves local sources', async () => {

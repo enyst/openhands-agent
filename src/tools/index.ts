@@ -267,7 +267,13 @@ function countOccurrences(content: string, needle: string): number {
 
 async function exists(path: string): Promise<boolean> { return stat(path).then(() => true).catch(() => false); }
 async function listDirectory(path: string): Promise<string[]> { const entries = await readdir(path, { withFileTypes: true }); return entries.filter((entry) => !entry.name.startsWith('.')).map((entry) => `${entry.isDirectory() ? 'd' : '-'} ${entry.name}`).sort(); }
-function numberLines(content: string, range: readonly number[] | null): string { const lines = content.replace(/\n$/u, '').split('\n'); const start = range?.[0] ?? 1; const end = range?.[1] === -1 ? lines.length : range?.[1] ?? lines.length; return lines.slice(start - 1, end).map((line, index) => `${start + index}\t${line}`).join('\n'); }
+function numberLines(content: string, range: readonly number[] | null): string {
+  const lines = content.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const start = range?.[0] ?? 1;
+  const end = range?.[1] === -1 ? lines.length : range?.[1] ?? lines.length;
+  return lines.slice(start - 1, end).map((line, index) => `${start + index}\t${line}`).join('\n');
+}
 function normalizeTrailingNewline(content: string, oldContent: string): string { return oldContent.endsWith('\n') && !content.endsWith('\n') ? `${content}\n` : content; }
 async function walkFiles(root: string): Promise<string[]> { const result: string[] = []; async function walk(dir: string): Promise<void> { for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) { if (entry.name === 'node_modules' || entry.name.startsWith('.git')) continue; const path = join(dir, entry.name); if (entry.isDirectory()) await walk(path); else if (entry.isFile()) result.push(path); } } await walk(root); return result.sort(); }
 function globMatch(pattern: string, relativePath: string): boolean { const normalized = relativePath.split(sep).join(posix.sep); const escaped = pattern.split(/[\\/]/u).map((part) => part.replace(/[.+^${}()|[\]\\]/gu, '\\$&').replace(/\*/gu, '[^/]*')).join('/'); return new RegExp(`(^|/)${escaped}$`, 'u').test(normalized); }
