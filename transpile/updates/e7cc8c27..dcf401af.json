@@ -1,0 +1,782 @@
+{
+  "schemaVersion": 1,
+  "repository": "OpenHands/software-agent-sdk",
+  "from": "e7cc8c27b2b234fc1c104825ad20dddf1c01fa31",
+  "to": "dcf401af7a9a302ef92cb7d092e1df9bb659daa5",
+  "inventorySha256": "99796467a61bd5d3bfac026c0ae240a9e93f964a46a96d18a30847bd10d6ca6d",
+  "items": {
+    "cd02db3a181c0bed5ee34711b46c06c88288854e:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "52feb4701fbe6f49ade878e48a77970455207408:sdk": {
+      "disposition": "DEVIATION",
+      "reason": "Native typed usage extraction already normalizes Chat and Responses once, preserves provider payload, explicit zero and absent unknown categories. Python adds UsageSnapshot and emits absent categories as zero, contrary to explicit TS measurement-coverage policy.",
+      "policy": "DEV-SDK-007",
+      "tracking": [],
+      "evidence": [
+        "src/llm/client.ts",
+        "src/llm/openai.ts",
+        "src/llm/__tests__/provider-usage.test.ts",
+        "src/conversation/__tests__/metrics.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "e8b1b26fdd828dc8421993fac1241999d14d1d93:sdk": {
+      "disposition": "DEFERRED",
+      "reason": "Registered-secret observation/image masking depends on existing missing SecretSource/registry runtime protocol; preserve opaque base64 bytes while masking ordinary URLs once that boundary exists. Current dispatch mask only transforms text and reasoning and already leaves image content unchanged. Do not broaden DEV-SDK-003 into excluding runtime masking. The unrelated reasoning override has no endpoint diff and native clients already forward configured effort.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.6"
+      ],
+      "evidence": [
+        "src/agent/response-dispatch.ts",
+        "src/mcp/index.ts",
+        "transpile/updates/d128a786..e7cc8c27.json"
+      ],
+      "compatibilityConsequence": "Registered-secret observation/image masking depends on existing missing SecretSource/registry runtime protocol; preserve opaque base64 bytes while masking ordinary URLs once that boundary exists. Current dispatch mask only transforms text and reasoning and already leaves image content unchanged. Do not broaden DEV-SDK-003 into excluding runtime masking. The unrelated reasoning override has no endpoint diff and native clients already forward configured effort.",
+      "revisitTrigger": "Implement the tracked native runtime boundary, then port the upstream regression cases listed in this interval.",
+      "docsImpact": "none",
+      "docs": []
+    },
+    "e8b1b26fdd828dc8421993fac1241999d14d1d93:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "3cc327096a236a8f16e311503ea4309eca526671:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Changes only Python test model fixtures from deprecated gpt-5.2-codex to gpt-5.4 and deletes redundant feature test rows. Native model wire semantics are unchanged; catalog refresh is separately c78.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/llm/__tests__/subscription-auth.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "dd8d9f6f3a280ab01a00fb7a3dc9ca791a372674:sdk": {
+      "disposition": "PORT",
+      "reason": "Orphan and duplicate observations no longer throw while computing protected event intervals; property enforcement retains responsibility for cleanup.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/context/view-properties.ts",
+        "src/context/__tests__/view-condenser-upstream-regressions.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "3f47426e6af4681aacab735c781426aae58a3bac:sdk": {
+      "disposition": "PORT",
+      "reason": "Omitted API mode is preserved through profile parsing and defaults to Responses only for normalized GPT6-family models at native factory selection. Explicit chat/responses and subscription transports remain authoritative.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/llm/index.ts",
+        "src/llm/factory.ts",
+        "src/llm/provider-quirks.ts",
+        "src/llm/__tests__/factory.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "b5e756b1061a859ce827a16e14ee484f317899bf:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python workspace cryptography<49 constraint for x86_64 macOS wheels and lock changes; native dependencies do not consume Python cryptography.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "package.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "b5e756b1061a859ce827a16e14ee484f317899bf:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "81f0054d8141ea3a8aee209ee2c4c530095ebc83:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "6ebd820d10794f1b52bb06ef6c19512888a1401b:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "9e042d1f0bf7233b2a1a2bca4872625768eaac71:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "0c3b613d0405351a68be7e70dcecf527d8fece1c:sdk": {
+      "disposition": "PORT",
+      "reason": "Normalize persisted MCP1/2 protocol spellings on parse and EventLog write, preserving unknown extension keys, opaque input/output JSON Schemas and metadata nulls. MCPToolDefinition emits canonical wire fields and consumes normalized annotations; reload does not rewrite historical disk records. This bounded port does not introduce executable MCP client hydration or own provider startup (tracked separately under wlw.7).",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/mcp/wire.ts",
+        "src/mcp/index.ts",
+        "src/event/index.ts",
+        "src/conversation/event-log.ts",
+        "src/mcp/__tests__/wire.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "880043bdd62a0b54252985311128b81ba3e1a362:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "InstallationMetadata already reads UTF-8 explicitly and Node writeFile string writes UTF-8 by default; unlike Python locale-default IO, non-ASCII metadata round-trips on the existing target path.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/extensions/index.ts",
+        "src/extensions/__tests__/extensions.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "5b59920fdf478f2231fd9e86920a6e35ed98ad07:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "a7cf924aa482eea613a64238d1673d457b97473f:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "5b36cacccc2bbe6f8fbce9e1d3ff4b0a3dcddadb:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python workspace version/lock update to1.49.5; native versions independent; regenerate catalogs/oracles at final target pin.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "package.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "5b36cacccc2bbe6f8fbce9e1d3ff4b0a3dcddadb:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "e21d77673b738f056676044600c4ad81c5a575c8:sdk": {
+      "disposition": "PORT",
+      "reason": "Port strict meta-profile schemas/store and classify_and_switch_llm with class-based and direct routing, native inline profile configurations, fresh reads, atomic limited writes and independent classifier accounting. Host runtime callbacks resolve explicit native profiles and durably accept pending selection before the completed-step boundary; four OpenHands settings fields and integration tests retain profile-first/secret-reference policy. Server endpoints are reconciled in the companion server unit. Fatal classifier accounting failures stop the run after active parallel siblings settle. Meta-store locks deliberately disable unsafe stale-file reaping; abandoned locks time out without mutation, as documented in DEV-SDK-004.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/meta-profiles/index.ts",
+        "src/meta-profiles/__tests__/meta-profile-store.test.ts",
+        "src/tool/classify-and-switch-llm.ts",
+        "src/tool/__tests__/classify-and-switch-llm.test.ts",
+        "src/settings/index.ts",
+        "examples/route-task-to-model.ts",
+        "src/llm/usage-persistence.ts",
+        "src/conversation/parallel-executor.ts",
+        "src/io/index.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "update",
+      "docs": [
+        "docs/TRANSPILE_CONTRACT.md",
+        "examples/route-task-to-model.ts"
+      ]
+    },
+    "e21d77673b738f056676044600c4ad81c5a575c8:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "c78c9b2bfd03788d4f50ea91ff9afd9399b80dab:sdk": {
+      "disposition": "PORT",
+      "reason": "Regenerated the verified catalog from the exact target Python source: GPT6 Sol/Luna and Opus5.5 additions, removed Opus4.8 entries, preserving the separately documented native subscription extension. Regression asserts catalog changes; the removed Python LiteLLM reasoning override has no native equivalent.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/llm/verified-models.ts",
+        "scripts/parity/generate-verified-models.py",
+        "src/llm/__tests__/verified-models.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "ea606dcab8047cf79d2df56c0015a7f966464e54:sdk": {
+      "disposition": "PORT",
+      "reason": "Native provider ingress emits typed sanitized authentication errors after refresh exhaustion. LocalConversation.run/arun persist ERROR plus exactly one friendly ConversationErrorEvent before rethrowing the original typed failure; wrapper causes are recognized and message-text lookalikes are not.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/llm/exceptions.ts",
+        "src/conversation/local-conversation.ts",
+        "src/conversation/__tests__/authentication-error.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "b874a47c9ca4cd00072af69871005441697b35c0:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Command hook stdout parser compares decision to known enum strings and otherwise returns null; null/number/object never receives lower(), so successful hooks remain successful.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/hooks/index.ts",
+        "src/hooks/__tests__/hooks.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "1612a78efa11b76ff347cbf3be7d6b6aeddbca62:sdk": {
+      "disposition": "PORT",
+      "reason": "Native API clients accept a runtime-only key refresh callback. A rejected credential is re-resolved once and retried only when the callback yields a changed nonempty key; empty/unchanged/throwing callbacks preserve the original sanitized authentication failure. Subscription refresh remains a separate existing lifecycle. Callers own credential storage; no callback or resolved value is persisted.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/llm/request-recovery.ts",
+        "src/llm/exceptions.ts",
+        "src/llm/openai.ts",
+        "src/llm/anthropic.ts",
+        "src/llm/gemini.ts",
+        "src/llm/__tests__/request-recovery.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "0620c8b1cd6b5daa523dc5fb8a3672bbd29214f1:sdk": {
+      "disposition": "DEFERRED",
+      "reason": "MCP OAuth now discovers protected-resource/auth-server metadata before refreshing an expired token, falls back to default endpoint on discovery network failure, and avoids discovery for valid tokens. Native MCP tools have no OAuth client/config lifecycle; carry explicitly under existing MCP auth debt. The prior historical tracking label is now backed by concrete Bead openhands-agent-wlw.9; historical review files are unchanged.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.9"
+      ],
+      "evidence": [
+        "src/mcp/index.ts",
+        "transpile/updates/d1595f72c..2eff609f.json"
+      ],
+      "compatibilityConsequence": "MCP OAuth now discovers protected-resource/auth-server metadata before refreshing an expired token, falls back to default endpoint on discovery network failure, and avoids discovery for valid tokens. Native MCP tools have no OAuth client/config lifecycle; carry explicitly under existing MCP auth debt.",
+      "revisitTrigger": "Implement the tracked native runtime boundary, then port the upstream regression cases listed in this interval.",
+      "docsImpact": "none",
+      "docs": []
+    },
+    "0620c8b1cd6b5daa523dc5fb8a3672bbd29214f1:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "3d88590621a76639803b4fec2969f59a22c7d052:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python server adds openhands-tools dependency to fix standalone Windows imports; native tools already ship within the bundled @smolpaws/openhands-agent npm dependency.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "package.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "3d88590621a76639803b4fec2969f59a22c7d052:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "0d8d3a52248c7cc73024ea5fdd73cdfe36e8f988:sdk": {
+      "disposition": "PORT",
+      "reason": "The native deterministic routing example registers explicit tool definitions, runs classifier selection through LocalConversation, and applies the accepted profile at the existing completed-step boundary.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "examples/route-task-to-model.ts",
+        "src/tool/__tests__/classify-and-switch-llm.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "update",
+      "docs": [
+        "docs/TRANSPILE_CONTRACT.md",
+        "examples/route-task-to-model.ts"
+      ]
+    },
+    "fcc102a697874d54a357e36004e02c95040dbdc0:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python workspace version/lock update to1.49.6; native versions independent; regenerate catalogs/oracles at final target pin.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "package.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "fcc102a697874d54a357e36004e02c95040dbdc0:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "7401022adcf8fa937a3dfb3c5595ffd1454f46de:sdk": {
+      "disposition": "PORT",
+      "reason": "Separate prompt-cache-key support from retention. A generated capability set comes from actual pinned Python feature checks over locked known OpenAI text IDs plus verified catalog entries, with source/dependency provenance. Unknown aliases omit keys unless explicitly enabled; known qualified routes retain capability, Anthropic/Gemini omit the OpenAI field.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/llm/provider-quirks.ts",
+        "src/llm/prompt-cache-models.ts",
+        "scripts/parity/generate-prompt-cache-models.py",
+        "src/llm/openai.ts",
+        "src/llm/__tests__/call-options.test.ts",
+        "src/llm/__tests__/prompt-cache-models.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "46c762c0ecbfe5846d52cf014df4b976ccf09caf:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python aiosqlite version floor/lock change only; native server uses file-backed state and native SDK has no aiosqlite dependency.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "package.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "46c762c0ecbfe5846d52cf014df4b976ccf09caf:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "d340af223fb1fb4e409ba8ed781d98f88c1f2459:sdk": {
+      "disposition": "PORT",
+      "reason": "Ordinary summarization protects an actual leading SystemPromptEvent even with keepFirst=0, while retaining native configured defaults.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/context/llm-summarizing-condenser.ts",
+        "src/context/__tests__/view-condenser-upstream-regressions.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "a350dc73ef9b4d3a801ffab2aed211a04d2120a9:sdk": {
+      "disposition": "DEVIATION",
+      "reason": "Change entirely inside GraySwan security analyzer: retain/synthesize system-first messages for its history window. Active risk/security analyzer execution is expressly excluded by existing deviation.",
+      "policy": "DEV-SDK-001",
+      "tracking": [],
+      "evidence": [
+        "docs/TRANSPILE_CONTRACT.md"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "032e0e998ed09c5d3c6e6fae7d85a9fbee0335cf:sdk": {
+      "disposition": "PORT",
+      "reason": "Ordinary and hard-reset summaries now send instructions as system content and event payload as user content. Pinned Python message-builder fixtures verify roles, exact whitespace, truncation and retry payloads; each attempt retains independent accounting.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/context/condenser-prompt.ts",
+        "src/context/llm-summarizing-condenser.ts",
+        "scripts/parity/generate-python-condenser-oracle.py",
+        "src/context/__tests__/condenser-prompt-python.test.ts",
+        "src/context/__tests__/view-condenser-upstream-regressions.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "d77ada7a030b3acaa82593d402632680361dfe42:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "da28c7736ea667ceae51cf3a3b9b37ab5f528f22:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Only adds docstrings to existing Python image helper functions; no executable behavior or wire changes.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "3311ba9eec5044f40ab5d0b3d7eddc9f7e1e2d14:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python schema preprocessing for token estimation incorrectly chose false as representative anyOf branch. Native MCP tool schema is passed verbatim rather than flattened, preserving true/false JSON Schema meaning; its JSON-based token-count path has no representative-branch selector to crash or widen.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/mcp/index.ts",
+        "src/mcp/__tests__/mcp.test.ts",
+        "src/llm/token-count.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "a8a9fc6e236a31c7adb876abb2be9e41e3c359b7:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "a130c8f9edf38c7a46825f7e6761d2497a00907b:sdk": {
+      "disposition": "PORT",
+      "reason": "Hard resets preserve the actual leading system prefix and place the summary after it; native reset replay behavior remains unchanged.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/context/llm-summarizing-condenser.ts",
+        "src/context/__tests__/view-condenser-upstream-regressions.test.ts",
+        "src/context/__tests__/agent-reset-view.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "a9b32b2124c022e2d47328c90efe9ec1f98253ba:sdk": {
+      "disposition": "DEFERRED",
+      "reason": "Goal judge system/user role split is in scope, but native SDK exports no goal judge/runtime module. This is pre-existing untracked behavior debt, not a named exclusion or NO_TARGET_CHANGE. Port the small judge kernel with explicit host-selected LLM or create dedicated tracked goal-judge debt.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.2"
+      ],
+      "evidence": [
+        "src/conversation/index.ts",
+        "docs/TRANSPILE_CONTRACT.md"
+      ],
+      "compatibilityConsequence": "Native consumers cannot use the upstream goal judge or goal-driven conversation lifecycle, including its new separated prompt roles.",
+      "revisitTrigger": "Implement native goal state/lifecycle with an explicit judge profile, then port judge prompt and accounting tests.",
+      "docsImpact": "none",
+      "docs": []
+    },
+    "71612374a8d3c639909b03613dbecf1ff999d0bd:sdk": {
+      "disposition": "DEVIATION",
+      "reason": "Null cache_creation_tokens already accepted with nullish zod schema and omitted from normalized known counts; TS does not turn null into Python zero. Existing regression at provider-usage.test.ts44-50.",
+      "policy": "DEV-SDK-007",
+      "tracking": [],
+      "evidence": [
+        "src/llm/openai.ts",
+        "src/llm/__tests__/provider-usage.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "bd33d63f7a134231bddb7ad989c68cded6188c8b:sdk": {
+      "disposition": "DEFERRED",
+      "reason": "Partially ported; defer only the pre-existing absent lifecycle integrations. Port immutable conversation-owned context, explicit/scoped/empty precedence and concurrent isolation across all existing native completion paths: main agent, condenser, classifier and prompt hook. Every local conversation owns a stable runtime identity without forcing disk persistence, profile switches preserve context, and optional cache shards do not mutate shared clients. The upstream fork/delegate/task/agent-hook/ask/title lifecycle APIs are not implemented in this SDK; their corresponding propagation remains explicitly deferred under wlw.8. Server title/identity behavior belongs to the companion server unit.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.8"
+      ],
+      "evidence": [
+        "src/llm/call-context.ts",
+        "src/conversation/local-conversation.ts",
+        "src/agent/agent.ts",
+        "src/hooks/index.ts",
+        "src/context/llm-summarizing-condenser.ts",
+        "src/tool/classify-and-switch-llm.ts",
+        "src/conversation/__tests__/call-context.test.ts",
+        "src/hooks/__tests__/call-context.test.ts",
+        "src/llm/__tests__/call-context.test.ts"
+      ],
+      "compatibilityConsequence": "Existing native completion paths use isolated context; absent fork/delegate/task/agent-hook/ask/title lifecycle APIs and their context propagation remain unavailable.",
+      "revisitTrigger": "When each tracked lifecycle is implemented, port its upstream child identity, cache shard, profile-switch and usage accounting tests.",
+      "docsImpact": "update",
+      "docs": [
+        "docs/TRANSPILE_CONTRACT.md",
+        "examples/route-task-to-model.ts"
+      ]
+    },
+    "bd33d63f7a134231bddb7ad989c68cded6188c8b:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "af3ed3ed99715fabd385058bec31d538336c9740:sdk": {
+      "disposition": "DEFERRED",
+      "reason": "Python masks non-tool responses outside state lock/event loop and repeats resolution if secret sources change during await. Native SecretStore is async and dispatch has a synchronous text masker, but general runtime SecretSource/LookupSecret registry remains absent. Carry this dependent concurrency behavior with the existing runtime hydration debt, not a storage deviation.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.6"
+      ],
+      "evidence": [
+        "src/agent/response-dispatch.ts",
+        "src/secrets/index.ts"
+      ],
+      "compatibilityConsequence": "Python masks non-tool responses outside state lock/event loop and repeats resolution if secret sources change during await. Native SecretStore is async and dispatch has a synchronous text masker, but general runtime SecretSource/LookupSecret registry remains absent. Carry this dependent concurrency behavior with the existing runtime hydration debt, not a storage deviation.",
+      "revisitTrigger": "Implement the tracked native runtime boundary, then port the upstream regression cases listed in this interval.",
+      "docsImpact": "none",
+      "docs": []
+    },
+    "85f4efdb5afd60e0ae0f14e25143d44630d0708c:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "b9d6f32e05b78f8b4ed3e3762deb806f89d40a12:sdk": {
+      "disposition": "DEFERRED",
+      "reason": "Runtime MCP startup exceptions must leave conversation ready with no failed-provider tools and a diagnostic. Native LocalConversation does not own runtime MCP provisioning; createMcpTools directly calls injected factory. Existing absence-only reconciliation notes are not an exclusion. Track MCP runtime lifecycle debt separately from auth or port lifecycle boundary.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.7"
+      ],
+      "evidence": [
+        "src/mcp/index.ts",
+        "src/conversation/local-conversation.ts",
+        "transpile/updates/56ac317..54dfbc5.json"
+      ],
+      "compatibilityConsequence": "Hosts still own MCP provider startup and must handle factory failures themselves; LocalConversation cannot recover an owned MCP lifecycle it does not yet provide.",
+      "revisitTrigger": "Implement owned MCP startup/shutdown and port partial-provider failure tests while retaining ordinary conversation readiness.",
+      "docsImpact": "none",
+      "docs": []
+    },
+    "7fa122478a3d90710cc2525c51c02aec0867b252:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python anyio floor/lock changes only; native runtime does not use anyio. Python oracle environment must use the target lock when regenerated.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "package.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "7fa122478a3d90710cc2525c51c02aec0867b252:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "2cb54835a9bb7bcf3b9e4487d2b18438f62c2f03:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "a72751d7e1476dc4be896da494dd6926653a70bf:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "d62d87e79b2ca9e0f954de89acbd5dcaa77d9be4:sdk": {
+      "disposition": "PORT",
+      "reason": "Port bounded native transport retries for 408/409/429/all5xx and connection/timeout failures with pinned retry defaults. Budget-denied responses have a typed sanitized non-retryable classification and are never replayed. Retry boundaries exclude parsed responses and emitted SSE, avoiding repeated billable completions. Native profile-first policy still excludes implicit model fallback chains.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "src/llm/request-recovery.ts",
+        "src/llm/exceptions.ts",
+        "src/llm/openai.ts",
+        "src/llm/anthropic.ts",
+        "src/llm/gemini.ts",
+        "src/llm/__tests__/request-recovery.test.ts",
+        "docs/TRANSPILE_CONTRACT.md"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "dcf401af7a9a302ef92cb7d092e1df9bb659daa5:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python workspace version/lock update to1.50.0; native versions independent; final pin/oracle target of this bounded batch.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [
+        "package.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "dcf401af7a9a302ef92cb7d092e1df9bb659daa5:server": {
+      "disposition": "DELEGATED",
+      "reason": "Server unit will be reviewed and implemented in smolpaws/smolpaws/packages/openhands-agent-server after this SDK batch merges.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    }
+  },
+  "unmapped": {
+    "52feb4701fbe6f49ade878e48a77970455207408:scripts/forbidden_dynamic_attributes_baseline.json": "Python static-analysis metadata removes stale dynamic telemetry getattr allowlist after typed UsageSnapshot port. No native runtime behavior; acknowledge in review."
+  }
+}

@@ -1,5 +1,6 @@
 import { agentErrorEventSchema, type ActionEvent, type AgentErrorEvent, type Event } from '../event/index.js';
 import { AGENT_OUTCOME } from '../event/error-classification.js';
+import { LLMUsagePersistenceError } from '../llm/usage-persistence.js';
 import type { CancellationToken } from './state.js';
 
 export type ToolRunner = (action: ActionEvent) => readonly Event[] | Promise<readonly Event[]>;
@@ -30,19 +31,29 @@ export class ParallelToolExecutor {
 
     const results: Event[][] = Array.from({ length: actions.length }, () => []);
     let nextIndex = 0;
+    let fatal: LLMUsagePersistenceError | undefined;
 
     const worker = async (): Promise<void> => {
-      while (nextIndex < actions.length) {
+      while (nextIndex < actions.length && fatal === undefined) {
         const index = nextIndex;
         nextIndex += 1;
         const action = actions[index];
         if (action !== undefined) {
-          results[index] = await this.runSafe(action, runner, options.cancelToken ?? null);
+          try { results[index] = await this.runSafe(action, runner, options.cancelToken ?? null); }
+          catch (error) {
+            if (!(error instanceof LLMUsagePersistenceError)) throw error;
+            fatal ??= error;
+          }
         }
       }
     };
 
-    await Promise.all(Array.from({ length: Math.min(this.maxConcurrency, actions.length) }, () => worker()));
+    // Stop taking queued actions, but let already-started side effects settle
+    // before the caller can resume or replace the conversation.
+    const settled = await Promise.allSettled(Array.from({ length: Math.min(this.maxConcurrency, actions.length) }, () => worker()));
+    if (fatal !== undefined) throw fatal;
+    const rejected = settled.find(result => result.status === 'rejected');
+    if (rejected?.status === 'rejected') throw rejected.reason;
     return results;
   }
 
@@ -54,6 +65,7 @@ export class ParallelToolExecutor {
     try {
       return [...(await runner(action))];
     } catch (error) {
+      if (error instanceof LLMUsagePersistenceError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       return [
         agentErrorEventSchema.parse({

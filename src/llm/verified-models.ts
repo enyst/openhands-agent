@@ -1,5 +1,7 @@
 // Generated from pinned Python llm/utils/verified_models.py; run scripts/parity/generate-verified-models.py.
 export const VERIFIED_OPENAI_MODELS = [
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-6-astra",
   "gpt-5.6",
   "gpt-5.6-sol",
@@ -10,8 +12,8 @@ export const VERIFIED_OPENAI_MODELS = [
 ] as const;
 
 export const VERIFIED_ANTHROPIC_MODELS = [
+  "claude-opus-5-5",
   "claude-opus-5",
-  "claude-opus-4-8",
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-haiku-4-5-20251001",
@@ -81,12 +83,14 @@ export const VERIFIED_QWEN_MODELS = [
 ] as const;
 
 export const VERIFIED_OPENHANDS_MODELS = [
+  "claude-opus-5-5",
   "claude-opus-5",
-  "claude-opus-4-8",
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-fable-5-1",
   "claude-fable-5",
+  "gpt-6-sol",
+  "gpt-6-luna",
   "gpt-6-astra",
   "gpt-5.6",
   "gpt-5.3-codex",
@@ -130,12 +134,14 @@ export const VERIFIED_OPENHANDS_MODELS = [
 
 export const VERIFIED_MODELS = {
   "openhands": [
+    "claude-opus-5-5",
     "claude-opus-5",
-    "claude-opus-4-8",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-fable-5-1",
     "claude-fable-5",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-6-astra",
     "gpt-5.6",
     "gpt-5.3-codex",
@@ -177,8 +183,8 @@ export const VERIFIED_MODELS = {
     "trinity-large-thinking"
   ],
   "anthropic": [
+    "claude-opus-5-5",
     "claude-opus-5",
-    "claude-opus-4-8",
     "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-haiku-4-5-20251001",
@@ -186,6 +192,8 @@ export const VERIFIED_MODELS = {
     "claude-fable-5"
   ],
   "openai": [
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-6-astra",
     "gpt-5.6",
     "gpt-5.6-sol",

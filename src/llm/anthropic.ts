@@ -1,5 +1,7 @@
 import { LLMContextBudget, type MetadataFetchLike } from './context-budget.js';
-import type { LLMTokenCountTool } from './client.js';
+import type { LLMCompletionOptions, LLMTokenCountTool } from './client.js';
+import { applyLLMCallContextHeaders, getLLMCallContext } from './call-context.js';
+import { replaceCredentialHeader, requestWithRecovery, type LLMRequestOptions } from './request-recovery.js';
 import { orderCompletedToolResults } from './tool-result-order.js';
 import { z } from 'zod';
 
@@ -19,7 +21,7 @@ const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MAX_TOKENS = 4096;
 
-export interface CreateAnthropicClientOptions {
+export interface CreateAnthropicClientOptions extends LLMRequestOptions {
   readonly fetch?: FetchLike;
   readonly metadataFetch?: MetadataFetchLike;
 }
@@ -29,7 +31,7 @@ export class AnthropicMessagesClient implements LLMClient {
   private readonly apiKey: string;
   private readonly fetchImpl: FetchLike;
 
-  constructor(profile: LLMProfile, apiKey: string, fetchImpl: FetchLike = defaultFetch, metadataFetch?: MetadataFetchLike) {
+  constructor(profile: LLMProfile, apiKey: string, fetchImpl: FetchLike = defaultFetch, metadataFetch?: MetadataFetchLike, private readonly requestOptions: LLMRequestOptions = {}) {
     this.profile = profile;
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl;
@@ -42,18 +44,23 @@ export class AnthropicMessagesClient implements LLMClient {
   getTokenCount(messages: readonly Message[], tools?: readonly LLMTokenCountTool[]): Promise<number | null> { return this.contextBudget.getTokenCount(messages, tools); }
   resolveRuntimeMetadata(): Promise<void> { return this.contextBudget.resolveRuntimeMetadata(); }
 
-  async complete(messages: readonly Message[], tools?: readonly ToolDefinition[]): Promise<LLMCompletionResponse> {
+  async complete(messages: readonly Message[], tools?: readonly ToolDefinition[], options?: LLMCompletionOptions): Promise<LLMCompletionResponse> {
+    const context = getLLMCallContext(options?.callContext);
     const body = buildAnthropicMessagesBody(this.profile, messages, tools);
-    const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/v1/messages`, {
-      method: 'POST',
-      headers: buildHeaders(this.profile, this.apiKey),
-      body: JSON.stringify(body),
-    }).catch(error => { throw mapProviderException(error); });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throwProviderErrorWithMetadata(text, providerResponseError('Anthropic messages', response.status, text), parseAnthropicMetadata);
-    }
+    const serializedBody = JSON.stringify(body);
+    const response = await requestWithRecovery(this.apiKey, this.requestOptions, async (key, refreshed) => {
+      const headers = buildHeaders(this.profile, key);
+      const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/v1/messages`, {
+        method: 'POST',
+        headers: applyLLMCallContextHeaders(refreshed ? replaceCredentialHeader(headers, 'x-api-key', key) : headers, context),
+        body: serializedBody,
+      }).catch(error => { throw mapProviderException(error); });
+      if (!response.ok) {
+        const text = await response.text();
+        throwProviderErrorWithMetadata(text, providerResponseError('Anthropic messages', response.status, text), parseAnthropicMetadata);
+      }
+      return response;
+    }, this.profile.authType === 'api_key');
 
     return parseAnthropicMessagesResponse(await response.json());
   }
@@ -77,7 +84,7 @@ export async function createAnthropicClientFromProfile(
       `Missing API key for Anthropic LLM profile '${profile.profileId}'. Set provider key '${profile.providerId}' or enable and set a profile override.`,
     );
   }
-  return new AnthropicMessagesClient(profile, apiKey, options.fetch ?? defaultFetch, options.metadataFetch);
+  return new AnthropicMessagesClient(profile, apiKey, options.fetch ?? defaultFetch, options.metadataFetch, options);
 }
 
 export function buildAnthropicMessagesBody(profile: LLMProfile, messages: readonly Message[], tools?: readonly ToolDefinition[]): Record<string, unknown> {

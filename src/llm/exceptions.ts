@@ -24,6 +24,53 @@ export class LLMBadRequestError extends Error {
   }
 }
 
+/** Sanitized HTTP failure at the native provider boundary. */
+export class LLMHttpError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
+    this.name = 'LLMHttpError';
+  }
+}
+
+export class LLMAuthenticationError extends LLMHttpError {
+  constructor(message = 'The LLM API key is invalid or lacks permission. Check the selected profile credentials.', statusCode = 401) {
+    super(message, statusCode);
+    this.name = 'LLMAuthenticationError';
+  }
+}
+
+export class LLMRateLimitError extends LLMHttpError {
+  constructor(message = 'The LLM provider rate limit was reached.', readonly quotaExhausted = false) {
+    super(message, 429);
+    this.name = 'LLMRateLimitError';
+  }
+}
+
+export class LLMBudgetExceededError extends LLMRateLimitError {
+  constructor() {
+    super('The LLM budget has been exceeded. Increase the budget or wait for it to reset.', true);
+    this.name = 'LLMBudgetExceededError';
+  }
+}
+
+export class LLMConnectionError extends Error {
+  constructor() {
+    super('The LLM provider connection failed.');
+    this.name = 'LLMConnectionError';
+  }
+}
+
+export function isLLMAuthenticationError(error: unknown): boolean {
+  return hasCause(error, value => value instanceof LLMAuthenticationError);
+}
+
+/** Only typed provider failures qualify; ordinary application errors do not. */
+export function isTransientProviderError(error: unknown): boolean {
+  return hasCause(error, value => value instanceof LLMConnectionError
+    || value instanceof LLMHttpError && !(value instanceof LLMRateLimitError && value.quotaExhausted)
+      && ([408, 409, 429].includes(value.statusCode) || value.statusCode >= 500 && value.statusCode < 600));
+}
+
 export class LLMContextWindowExceedError extends LLMBadRequestError {
   constructor(message = 'LLM context window exceeded') {
     super(message);
@@ -113,12 +160,19 @@ export function providerResponseError(provider: string, status: number, body: un
   const message = `${provider} completion failed with HTTP ${status}`;
   const details = errorDetails(body).map(value => value.toLowerCase());
   const text = details.join(' ');
-  // Explicit transport auth/rate-limit failures must never start condensation.
-  if ([401, 403, 429].includes(status)) return new Error(message);
+  // Explicit transport authentication is authoritative, including for the
+  // opt-in refresh hook, regardless of quota words in the provider's message.
+  if ([401, 403].includes(status)) return new LLMAuthenticationError(undefined, status);
+  // Python infers budget denials only from rate-limit errors; generic 5xx text
+  // must not acquire that type. Hard quota markers are status-independent.
+  if (status === 429 && /budget_exceeded|budget has been exceeded/u.test(text)) return new LLMBudgetExceededError();
+  if (/usage_limit_reached|insufficient_quota/u.test(text)) return new LLMRateLimitError(message, true);
+  // Explicit transport rate limits must never start condensation.
+  if (status === 429) return new LLMRateLimitError(message);
   if (CONTENT_POLICY_PATTERNS.some(pattern => text.includes(pattern)))
     return new LLMContentPolicyViolationError();
   if (/invalid api key|unauthorized|missing api key|invalid authentication|access denied|status 40[13]/u.test(text))
-    return new Error(message);
+    return new LLMAuthenticationError();
   if (/max_(?:output_|completion_)?tokens(?: value)? (?:must be|is too (?:large|high)|cannot exceed)/u.test(text))
     return new LLMBadRequestError(message);
   if ([200, 400, 413, 422, 500, 502, 503].includes(status)) {
@@ -128,14 +182,26 @@ export function providerResponseError(provider: string, status: number, body: un
     if (MALFORMED_HISTORY_PATTERNS.some(pattern => text.includes(pattern)))
       return new LLMMalformedConversationHistoryError(message);
   }
+  if ([408, 409].includes(status) || status >= 500 && status < 600) return new LLMHttpError(message, status);
   return status >= 400 && status < 500 ? new LLMBadRequestError(message) : new Error(message);
 }
 
 /** Support typed transport wrappers used by advanced/injected provider clients. */
 export function mapProviderException(error: unknown): unknown {
+  if (error instanceof Error && ['AuthenticationError', 'PermissionDeniedError'].includes(error.name)) return new LLMAuthenticationError(undefined, error.name === 'PermissionDeniedError' ? 403 : 401);
+  if (error instanceof Error && error.name === 'BudgetExceededError') return new LLMBudgetExceededError();
+  if (error instanceof Error && error.name === 'RateLimitError') return providerResponseError('LLM provider', 429, error.message);
+  if (error instanceof Error && ['APIError', 'OpenAIError'].includes(error.name)) {
+    const status = 'status_code' in error ? error.status_code : 'status' in error ? error.status : undefined;
+    if (typeof status === 'number' && Number.isInteger(status) && status >= 400 && status < 600) return providerResponseError('LLM provider', status, error.message);
+  }
   if (error instanceof Error && ['BadRequestError', 'OpenAIError', 'APIConnectionError', 'InternalServerError', 'ContextWindowExceededError'].includes(error.name)) {
     if (error.name === 'ContextWindowExceededError') return new LLMContextWindowExceedError();
-    return providerResponseError('LLM provider', error.name === 'BadRequestError' ? 400 : 500, error.message);
+    const mapped = providerResponseError('LLM provider', error.name === 'BadRequestError' ? 400 : 500, error.message);
+    return error.name === 'APIConnectionError' && mapped instanceof LLMHttpError
+      && !(mapped instanceof LLMRateLimitError || mapped instanceof LLMAuthenticationError) ? new LLMConnectionError() : mapped;
   }
+  // These names originate at fetch, before any response is emitted or parsed.
+  if (error instanceof Error && (['TimeoutError', 'APITimeoutError'].includes(error.name) || error instanceof TypeError && /fetch failed|network|failed to fetch|load failed/iu.test(error.message))) return new LLMConnectionError();
   return error;
 }

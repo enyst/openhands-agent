@@ -1,5 +1,7 @@
 import { LLMContextBudget, type MetadataFetchLike } from './context-budget.js';
-import type { LLMTokenCountTool } from './client.js';
+import type { LLMCompletionOptions, LLMTokenCountTool } from './client.js';
+import { applyLLMCallContextHeaders, getLLMCallContext } from './call-context.js';
+import { replaceCredentialHeader, requestWithRecovery, type LLMRequestOptions } from './request-recovery.js';
 import { providerResponseError, mapProviderException } from './exceptions.js';
 import { orderCompletedToolResults } from './tool-result-order.js';
 import { z } from 'zod';
@@ -15,7 +17,7 @@ export type { LLMProfile } from './index.js';
 
 const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-export interface CreateGeminiClientOptions {
+export interface CreateGeminiClientOptions extends LLMRequestOptions {
   readonly fetch?: FetchLike;
   readonly metadataFetch?: MetadataFetchLike;
 }
@@ -25,7 +27,7 @@ export class GeminiClient implements LLMClient {
   private readonly apiKey: string;
   private readonly fetchImpl: FetchLike;
 
-  constructor(profile: LLMProfile, apiKey: string, fetchImpl: FetchLike = defaultFetch, metadataFetch?: MetadataFetchLike) {
+  constructor(profile: LLMProfile, apiKey: string, fetchImpl: FetchLike = defaultFetch, metadataFetch?: MetadataFetchLike, private readonly requestOptions: LLMRequestOptions = {}) {
     this.profile = profile;
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl;
@@ -38,17 +40,22 @@ export class GeminiClient implements LLMClient {
   getTokenCount(messages: readonly Message[], tools?: readonly LLMTokenCountTool[]): Promise<number | null> { return this.contextBudget.getTokenCount(messages, tools); }
   resolveRuntimeMetadata(): Promise<void> { return this.contextBudget.resolveRuntimeMetadata(); }
 
-  async complete(messages: readonly Message[], tools?: readonly ToolDefinition[]): Promise<LLMCompletionResponse> {
-    const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/interactions`, {
-      method: 'POST',
-      headers: buildHeaders(this.profile, this.apiKey),
-      body: JSON.stringify(buildGeminiInteractionsBody(this.profile, messages, tools)),
-    }).catch(error => { throw mapProviderException(error); });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throwProviderErrorWithMetadata(text, providerResponseError('Gemini Interactions', response.status, text), parseGeminiMetadata);
-    }
+  async complete(messages: readonly Message[], tools?: readonly ToolDefinition[], options?: LLMCompletionOptions): Promise<LLMCompletionResponse> {
+    const context = getLLMCallContext(options?.callContext);
+    const serializedBody = JSON.stringify(buildGeminiInteractionsBody(this.profile, messages, tools));
+    const response = await requestWithRecovery(this.apiKey, this.requestOptions, async (key, refreshed) => {
+      const headers = buildHeaders(this.profile, key);
+      const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/interactions`, {
+        method: 'POST',
+        headers: applyLLMCallContextHeaders(refreshed ? replaceCredentialHeader(headers, 'x-goog-api-key', key) : headers, context),
+        body: serializedBody,
+      }).catch(error => { throw mapProviderException(error); });
+      if (!response.ok) {
+        const text = await response.text();
+        throwProviderErrorWithMetadata(text, providerResponseError('Gemini Interactions', response.status, text), parseGeminiMetadata);
+      }
+      return response;
+    }, this.profile.authType === 'api_key');
 
     return parseGeminiInteractionResponse(await response.json());
   }
@@ -72,7 +79,7 @@ export async function createGeminiClientFromProfile(
       `Missing API key for Gemini LLM profile '${profile.profileId}'. Set provider key '${profile.providerId}' or enable and set a profile override.`,
     );
   }
-  return new GeminiClient(profile, apiKey, options.fetch ?? defaultFetch, options.metadataFetch);
+  return new GeminiClient(profile, apiKey, options.fetch ?? defaultFetch, options.metadataFetch, options);
 }
 
 export function buildGeminiInteractionsBody(

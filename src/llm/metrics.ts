@@ -4,6 +4,7 @@ import { conversationStateUpdateEventSchema, type Event } from '../event/index.j
 import { llmUsageSchema, type LLMResponseMetadata } from './client.js';
 import type { LLMProfile } from './index.js';
 import { estimateUsageCost } from './pricing.js';
+import { resolveOpenAiApiMode } from './transport.js';
 
 // Python persists full ConversationStats in base_state.json. The native SDK's
 // EventLog is its durable store: record deltas here, project the upstream shape.
@@ -39,7 +40,7 @@ export function llmHistoryOrigin(profile: LLMProfile): string {
     profile.profileId, profile.providerId, profile.model,
     // URL userinfo/query and custom headers may contain credentials. They never enter this digest.
     endpoint === null ? null : `${endpoint.origin}${endpoint.pathname}`,
-    profile.openAiApiMode, profile.authType, profile.subscriptionVendor, profile.useProfileKeyOverride,
+    resolveOpenAiApiMode(profile), profile.authType, profile.subscriptionVendor, profile.useProfileKeyOverride,
   ])).digest('hex');
 }
 

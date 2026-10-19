@@ -4,7 +4,7 @@ import type { LLMClient, LLMCompletionResponse } from '../llm/client.js';
 import { messageSchema, textContent } from '../llm/index.js';
 import { CondenserCompletionCallbackError, NoCondensationAvailableError, RollingCondenser, type CondenserContext, type CondensationRequirement } from './condenser.js';
 import { getSuffixLengthForTokenReduction, getTotalTokenCount } from './condenser-utils.js';
-import { renderCondenserEvent, renderSummarizingPrompt, truncateCondenserEvent } from './condenser-prompt.js';
+import { renderCondenserEvent, renderSummarizingEventsPrompt, renderSummarizingSystemPrompt, truncateCondenserEvent } from './condenser-prompt.js';
 import type { View } from './view.js';
 
 export type CondensationReason = 'request' | 'tokens' | 'events';
@@ -87,7 +87,8 @@ export class LLMSummarizingCondenser extends RollingCondenser {
       }
     }
     if (!tailSizes.length) throw new NoCondensationAvailableError('Token count became unavailable while computing forgotten events');
-    const start = view.manipulationIndices.findNext(this.keepFirst);
+    const protectedPrefix = Math.max(this.keepFirst, leadingSystemPromptPrefixLength(view.events));
+    const start = view.manipulationIndices.findNext(protectedPrefix);
     const end = view.manipulationIndices.findNext(view.length - Math.min(...tailSizes));
     return { events: view.events.slice(start, end), summaryOffset: start };
   }
@@ -109,11 +110,18 @@ export class LLMSummarizingCondenser extends RollingCondenser {
     // Capture membership before asynchronous completion/accounting; later arrivals were not summarized.
     const forgottenEvents = [...events];
     const projected = context?.projectEvents?.(forgottenEvents, this.llm.profile) ?? forgottenEvents;
-    const prompt = renderSummarizingPrompt(projected.map(event => truncateCondenserEvent(renderCondenserEvent(event), maxEventStringLength)));
-    const messages = [messageSchema.parse({ role: 'user', content: [textContent(prompt)] })];
+    const prompt = renderSummarizingEventsPrompt(projected.map(event => truncateCondenserEvent(renderCondenserEvent(event), maxEventStringLength)));
+    const messages = [
+      messageSchema.parse({ role: 'system', content: [textContent(renderSummarizingSystemPrompt())] }),
+      messageSchema.parse({ role: 'user', content: [textContent(prompt)] }),
+    ];
     const startedAt = Date.now();
     let response: LLMCompletionResponse;
-    try { response = await this.llm.complete(messages); }
+    try {
+      response = context?.callContext === undefined
+        ? await this.llm.complete(messages)
+        : await this.llm.complete(messages, undefined, { callContext: context.callContext });
+    }
     catch (error) {
       await this.recordCompletion(context, { llm: this.llm, error, startedAt, completedAt: Date.now() });
       throw new NoCondensationAvailableError(`Summarization LLM call failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -131,19 +139,26 @@ export class LLMSummarizingCondenser extends RollingCondenser {
   }
 
   override async hardContextReset(view: View, _agentLlm?: LLMClient | null, context?: CondenserContext): Promise<Condensation | null> {
-    const events = [...view.events];
+    const originalEvents = [...view.events];
+    const summaryOffset = leadingSystemPromptPrefixLength(originalEvents);
+    const events = originalEvents.slice(summaryOffset);
     let limit: number | null = null;
     for (let attempt = 0; attempt < this.hardContextResetMaxRetries; attempt++) {
-      try { return await this.generateCondensation(events, 0, limit, context); }
+      try { return await this.generateCondensation(events, summaryOffset, limit, context); }
       catch (error) {
         if (error instanceof CondenserCompletionCallbackError) throw error;
-        if (events.length === 0) throw error;
-        limit ??= Math.max(...events.map(event => [...renderCondenserEvent(event)].length));
+        if (originalEvents.length === 0) throw error;
+        limit ??= Math.max(...originalEvents.map(event => [...renderCondenserEvent(event)].length));
         limit = Math.trunc(limit * this.hardContextResetContextScaling);
       }
     }
     return null;
   }
+}
+
+/** Python preserves every event through the first system prompt, even when it is not at index zero. */
+function leadingSystemPromptPrefixLength(events: readonly LLMConvertibleEvent[]): number {
+  return events.findIndex(event => event.kind === 'SystemPromptEvent') + 1;
 }
 
 /** DEV-SDK-011: the standard factory shares the target class/settings defaults of 1000/2. */

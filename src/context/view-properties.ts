@@ -82,10 +82,9 @@ export class ToolCallMatchingProperty implements ViewProperty {
     const pending = new Set<string>();
     for (const [index, event] of currentEvents.entries()) {
       if (event.kind === 'ActionEvent') pending.add(event.tool_call_id);
-      else if (isObservation(event) && !pending.delete(event.tool_call_id)) {
-        // Python's strict set.remove likewise rejects duplicate or out-of-order results.
-        throw new RangeError(`No pending tool call for observation: ${event.tool_call_id}`);
-      }
+      // A raw View can contain orphan/duplicate results before property enforcement.
+      // Discard only the matching pending ID; an orphan cannot release another call.
+      else if (isObservation(event)) pending.delete(event.tool_call_id);
       if (pending.size > 0) indices.delete(index + 1);
     }
     return indices;

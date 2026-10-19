@@ -79,13 +79,17 @@ describe('AgentSettings', () => {
     });
 
     expect(Object.keys(settings).sort()).toEqual([
+      'active_meta_profile',
       'agent',
       'agent_kind',
       'condenser',
+      'enable_classify_and_switch_llm_tool',
       'enable_sub_agents',
       'enable_switch_llm_tool',
       'llm_profile_ref',
       'mcp_config',
+      'meta_profile',
+      'meta_profile_llms',
       'schema_version',
       'tool_concurrency_limit',
       'tools',

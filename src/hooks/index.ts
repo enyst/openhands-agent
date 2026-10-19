@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
 import type { LLMClient } from '../llm/client.js';
+import { getLLMCallContext, type LLMCallContext } from '../llm/call-context.js';
 import { messageSchema, reduceTextContent, textContent, type Message } from '../llm/index.js';
 import { getUserPersistenceDir } from '../utils/index.js';
 
@@ -307,12 +308,14 @@ export class HookExecutor {
   readonly asyncProcessManager: AsyncProcessManager;
   private readonly llm: LLMClient | null;
   private readonly llmGetter: (() => LLMClient | null) | null;
+  private readonly callContext: LLMCallContext | null;
 
-  constructor(options: { readonly workingDir?: string | null; readonly asyncProcessManager?: AsyncProcessManager | null; readonly llm?: LLMClient | null; readonly llmGetter?: (() => LLMClient | null) | null } = {}) {
+  constructor(options: { readonly workingDir?: string | null; readonly asyncProcessManager?: AsyncProcessManager | null; readonly llm?: LLMClient | null; readonly llmGetter?: (() => LLMClient | null) | null; readonly callContext?: LLMCallContext | null } = {}) {
     this.workingDir = options.workingDir ?? process.cwd();
     this.asyncProcessManager = options.asyncProcessManager ?? new AsyncProcessManager();
     this.llm = options.llm ?? null;
     this.llmGetter = options.llmGetter ?? null;
+    this.callContext = options.callContext ?? null;
   }
 
   private resolveLlm(): LLMClient | null {
@@ -364,7 +367,7 @@ export class HookExecutor {
 
     let raw: string;
     try {
-      const response = await llm.complete(messages);
+      const response = await llm.complete(messages, undefined, { callContext: getLLMCallContext(this.callContext) });
       raw = reduceTextContent(response.message);
     } catch (error) {
       return this.fallOpen('Prompt hook execution failed — defaulting to allow', String(error));

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
+import { normalizePersistedMcpTool } from '../mcp/wire.js';
 
 import {
   contentSchema,
@@ -103,7 +104,7 @@ export const systemPromptEventSchema = eventObject({
   kind: z.literal('SystemPromptEvent').default('SystemPromptEvent'),
   source: z.literal('agent').default('agent'),
   system_prompt: contentSchema.refine((content) => content.type === 'text', 'system_prompt must be text'),
-  tools: z.array(recordSchema),
+  tools: z.array(recordSchema.transform(normalizePersistedMcpTool)),
   dynamic_context: contentSchema
     .refine((content) => content.type === 'text', 'dynamic_context must be text')
     .nullable()

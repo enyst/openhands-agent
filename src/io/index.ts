@@ -9,6 +9,9 @@ import { toPosixPath } from '../utils/index.js';
 export interface FileStoreLockOptions {
   readonly timeoutSeconds?: number;
   readonly pollIntervalMs?: number;
+  /** Defaults to legacy recovery. False never removes another owner's lock;
+   * abandoned locks then require cleanup while all writers are stopped. */
+  readonly recoverStaleLocks?: boolean;
 }
 
 export interface FileStore {
@@ -229,7 +232,7 @@ export class LocalFileStore implements FileStore {
         if (!isExistingLockError(error) || Date.now() >= deadline) {
           throw error;
         }
-        removeStaleLockFile(fullPath);
+        if (options.recoverStaleLocks !== false) removeStaleLockFile(fullPath);
         sleepSync(pollIntervalMs);
       }
     }
@@ -278,7 +281,7 @@ export class LocalFileStore implements FileStore {
         if (!isExistingLockError(error) || Date.now() >= deadline) {
           throw error;
         }
-        await removeStaleLockFileAsync(fullPath);
+        if (options.recoverStaleLocks !== false) await removeStaleLockFileAsync(fullPath);
         await sleepAsync(pollIntervalMs);
       }
     }

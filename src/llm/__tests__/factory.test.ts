@@ -6,6 +6,10 @@ import { GeminiClient } from '../gemini.js';
 import { llmProfileSchema, textContent } from '../index.js';
 import { OpenAIChatClient, OpenAIResponsesClient } from '../openai.js';
 import { createClientFromProfile, detectProviderFromBaseUrl, resolveProviderFromProfile } from '../factory.js';
+import { createLlmUsageEvent, llmHistoryOrigin } from '../metrics.js';
+import { latestReportedInputTokens } from '../reported-input.js';
+import { historyForProfile } from '../history.js';
+import { messageEventSchema } from '../../event/index.js';
 
 interface FakeFetchCall {
   readonly url: string;
@@ -14,6 +18,50 @@ interface FakeFetchCall {
 }
 
 describe('createClientFromProfile', () => {
+  it.each(['claude-sonnet-4-5', 'gpt-6-sol'])('restores native signed history with the historical omitted-mode default (%s)', async model => {
+    const configured = llmProfileSchema.parse({ profileId: 'same', providerId: 'anthropic', model });
+    const oldProfile = { ...configured, openAiApiMode: 'chat_completions' as const };
+    const reply = messageEventSchema.parse({ source: 'agent', llm_response_id: 'saved', llm_message: {
+      role: 'assistant', content: 'saved reply', thinking_blocks: [{ type: 'thinking', thinking: 'thought', signature: 'signed' }],
+    } });
+    const usage = createLlmUsageEvent(oldProfile, { usage: null, responseId: 'saved' }, { startedAt: 0, completedAt: 1 });
+    const saved = JSON.parse(JSON.stringify([usage, reply])) as [typeof usage, typeof reply];
+    const store = new InMemorySecretStore([[llmProviderSecretRef('anthropic'), 'test-key']]);
+    const client = await createClientFromProfile(configured, store);
+    expect(historyForProfile([saved[1]], saved, client.profile)).toEqual([reply]);
+    expect(llmHistoryOrigin(configured)).toBe(llmHistoryOrigin(oldProfile));
+  });
+
+  it('binds directly constructed clients with omitted modes to their actual transport', () => {
+    const profile = llmProfileSchema.parse({ profileId: 'direct', providerId: 'openai', model: 'gpt-6-sol' });
+    expect(llmHistoryOrigin(new OpenAIChatClient(profile, 'test').profile)).toBe(llmHistoryOrigin({ ...profile, openAiApiMode: 'chat_completions' }));
+    expect(llmHistoryOrigin(new OpenAIResponsesClient(profile, 'test').profile)).toBe(llmHistoryOrigin({ ...profile, openAiApiMode: 'responses' }));
+  });
+
+  it.each([
+    ['gpt-4o', 'chat_completions'], ['gpt-6-sol', 'responses'],
+  ] as const)('keeps configured and effective %s history bindings identical', async (model, mode) => {
+    const configured = llmProfileSchema.parse({ profileId: 'history', providerId: 'openai', model });
+    const store = new InMemorySecretStore([[llmProviderSecretRef('openai'), 'test-key']]);
+    const client = await createClientFromProfile(configured, store);
+    const persisted = llmProfileSchema.parse({ ...configured, openAiApiMode: mode });
+    expect(llmHistoryOrigin(configured)).toBe(llmHistoryOrigin(client.profile));
+    expect(llmHistoryOrigin(configured)).toBe(llmHistoryOrigin(persisted));
+    const event = createLlmUsageEvent(client.profile, { usage: { promptTokens: 750 }, responseId: 'response' }, { startedAt: 0, completedAt: 1, requestSucceeded: true });
+    expect(latestReportedInputTokens([event], configured)).toBe(750);
+    expect(llmHistoryOrigin({ ...configured, openAiApiMode: mode === 'responses' ? 'chat_completions' : 'responses' })).not.toBe(llmHistoryOrigin(configured));
+  });
+
+  // PORT: upstream 3f47426e GPT-6 family transport default.
+  it.each(['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'openai/gpt-6-sol', 'litellm_proxy/gpt-6-luna', 'GPT-6.1-SOL'])(
+    'uses Responses for an omitted mode on %s while honoring explicit chat', async model => {
+      const store = new InMemorySecretStore([[llmProviderSecretRef('openai'), 'test-key']]);
+      const input = { profileId: 'gpt6', providerId: 'openai', model };
+      expect(await createClientFromProfile(llmProfileSchema.parse(input), store)).toBeInstanceOf(OpenAIResponsesClient);
+      expect(await createClientFromProfile(llmProfileSchema.parse({ ...input, openAiApiMode: 'chat_completions' }), store)).toBeInstanceOf(OpenAIChatClient);
+    },
+  );
+
   it('routes Anthropic profiles to the Anthropic Messages client', async () => {
     const profile = llmProfileSchema.parse({ profileId: 'anthropic', providerId: 'anthropic', model: 'claude-sonnet-4-5' });
     const store = new InMemorySecretStore([[llmProviderSecretRef('anthropic'), 'anthropic-key']]);
