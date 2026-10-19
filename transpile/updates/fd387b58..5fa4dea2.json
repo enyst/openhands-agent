@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "repository": "OpenHands/software-agent-sdk",
+  "from": "fd387b58dc7b707b73c159845c0396a17000be24",
+  "to": "5fa4dea24c52fe3ac53fa4e3e67a1376b72189e2",
+  "inventorySha256": "afd3f25d7394cfbb07560be835ac578e02c0779ae9a81a378f8eb596ca60a037",
+  "items": {
+    "f5f849f5ab51502cdfff97870f29de95307882a4:server": {
+      "disposition": "DELEGATED",
+      "reason": "openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package's server review record.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "d5995133d9425e6a37756b28ae19543b5d85306d:sdk": {
+      "disposition": "PORT",
+      "reason": "Port getGitChanges one-level nested-repository aggregation and the missing finite ancestry/deduplication prerequisite, preserving typed base errors, skipping invalid child repositories and retaining clean-child success. Absence of the aggregator was not a sound NO_TARGET_CHANGE rationale in the historical ancestry review; add real Git regressions and use it in the ordered server companion.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.20"
+      ],
+      "evidence": [
+        "src/git/index.ts",
+        "src/git/__tests__/nested-changes.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "update",
+      "docs": [
+        "transpile/updates/fd387b58..5fa4dea2.md"
+      ]
+    },
+    "d5995133d9425e6a37756b28ae19543b5d85306d:server": {
+      "disposition": "DELEGATED",
+      "reason": "openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package's server review record.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "cb266703c5c797f10f17eea8fea61a25ad2eac30:server": {
+      "disposition": "DELEGATED",
+      "reason": "openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package's server review record.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "db9c54b71c8c9ed46a2454fc65eee804d3c1e8aa:sdk": {
+      "disposition": "PORT",
+      "reason": "Mixed unit: port the newly public AgentProfileInfo and AgentProfileListResponse schemas/types/exports, preserving permissive string agent_kind and nullable summary defaults. Existing EXC-SDK-001 excludes exactly plugin/__init__.py, plugin/fetch.py, plugin/paths.py, plugin/strict_fetch.py and tests/sdk/plugin/test_plugin_strict_fetch.py: these use Plugin.load and plugin-specific immutable fetch/cache semantics; generic extensions.fetch is unchanged. Do not blanket-exclude the independent profile primitives or claim plugin preflight implemented.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.20"
+      ],
+      "evidence": [
+        "src/profiles/index.ts",
+        "src/profiles/__tests__/profile-summaries.test.ts"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "update",
+      "docs": [
+        "transpile/updates/fd387b58..5fa4dea2.md"
+      ]
+    },
+    "db9c54b71c8c9ed46a2454fc65eee804d3c1e8aa:server": {
+      "disposition": "DELEGATED",
+      "reason": "openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package's server review record.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    },
+    "5fa4dea24c52fe3ac53fa4e3e67a1376b72189e2:sdk": {
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "Python workspace release1.55.1 and project-version lock metadata only. Native package version is independent; regenerate all13 source-bound artifacts from the clean locked target checkout, not by relabeling hashes.",
+      "policy": null,
+      "tracking": [
+        "openhands-agent-wlw.20"
+      ],
+      "evidence": [
+        "transpile/upstream.json",
+        "src/llm/model-discovery-catalog.ts",
+        "src/launch/__tests__/fixtures/python-profile-skill-selection.json"
+      ],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "update",
+      "docs": [
+        "transpile/updates/fd387b58..5fa4dea2.md"
+      ]
+    },
+    "5fa4dea24c52fe3ac53fa4e3e67a1376b72189e2:server": {
+      "disposition": "DELEGATED",
+      "reason": "openhands-agent-server is transpiled separately in smolpaws/smolpaws/packages/openhands-agent-server; the disposition is recorded in that package's server review record.",
+      "policy": null,
+      "tracking": [],
+      "evidence": [],
+      "compatibilityConsequence": null,
+      "revisitTrigger": null,
+      "docsImpact": "none",
+      "docs": []
+    }
+  },
+  "unmapped": {}
+}

@@ -149,7 +149,7 @@
   },
   "schemaVersion": 1,
   "source": {
-    "commit": "fd387b58dc7b707b73c159845c0396a17000be24",
+    "commit": "5fa4dea24c52fe3ac53fa4e3e67a1376b72189e2",
     "repository": "OpenHands/software-agent-sdk"
   }
 }

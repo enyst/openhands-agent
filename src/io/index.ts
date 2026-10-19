@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { mkdir, open, readFile, stat, unlink, type FileHandle } from 'node:fs/promises';
@@ -137,7 +138,7 @@ export interface LocalFileStoreOptions {
 export class LocalFileStore implements FileStore {
   readonly root: string;
   readonly cache: MemoryLRUCache<string, string>;
-  private readonly locks = new Set<string>();
+  private readonly locks = new Map<string, symbol>();
 
   constructor(root: string, options: LocalFileStoreOptions = {}) {
     const expandedRoot = root.startsWith('~') ? path.join(process.env.HOME ?? '', root.slice(1)) : root;
@@ -238,9 +239,10 @@ export class LocalFileStore implements FileStore {
       }
     }
 
-    this.locks.add(fullPath);
+    const owner = Symbol();
+    this.locks.set(fullPath, owner);
     try {
-      const result = callback();
+      const result = withLockOwner(owner, callback);
       assertSynchronousLockResult(result);
       return result;
     } finally {
@@ -248,16 +250,14 @@ export class LocalFileStore implements FileStore {
         removeLockFile(fullPath);
       } finally {
         this.cache.delete(fullPath);
-        this.locks.delete(fullPath);
+        if (this.locks.get(fullPath) === owner) this.locks.delete(fullPath);
       }
     }
   }
 
   async lockAsync<T>(filePath: string, callback: () => T | Promise<T>, options: FileStoreLockOptions = {}): Promise<T> {
     const fullPath = this.getFullPath(filePath);
-    if (this.locks.has(fullPath)) {
-      throw new Error(`Deadlock detected: lock already held for ${filePath}`);
-    }
+    assertNotAsyncLockOwner(this.locks.get(fullPath), filePath);
 
     await mkdir(path.dirname(fullPath), { recursive: true });
     const deadline = Date.now() + (options.timeoutSeconds ?? 30) * 1000;
@@ -287,12 +287,13 @@ export class LocalFileStore implements FileStore {
       }
     }
 
-    this.locks.add(fullPath);
+    const owner = Symbol();
+    this.locks.set(fullPath, owner);
     let result!: T;
     let callbackFailed = false;
     let cleanupError: unknown;
     try {
-      result = await callback();
+      result = await withLockOwner(owner, callback);
     } catch (error) {
       callbackFailed = true;
       throw error;
@@ -305,7 +306,7 @@ export class LocalFileStore implements FileStore {
         }
       } finally {
         this.cache.delete(fullPath);
-        this.locks.delete(fullPath);
+        if (this.locks.get(fullPath) === owner) this.locks.delete(fullPath);
       }
     }
     if (cleanupError !== undefined) {
@@ -336,7 +337,7 @@ export class LocalFileStore implements FileStore {
 export class InMemoryFileStore implements FileStore {
   readonly files: MemoryLRUCache<string, string>;
   private readonly instanceId = randomUUID().replace(/-/gu, '');
-  private readonly locks = new Set<string>();
+  private readonly locks = new Map<string, symbol>();
 
   constructor(files: Readonly<Record<string, string>> = {}, options: LocalFileStoreOptions = {}) {
     this.files = new MemoryLRUCache<string, string>({
@@ -401,27 +402,34 @@ export class InMemoryFileStore implements FileStore {
       throw new Error(`Deadlock detected: lock already held for ${filePath}`);
     }
 
-    this.locks.add(filePath);
+    const owner = Symbol();
+    this.locks.set(filePath, owner);
     try {
-      const result = callback();
+      const result = withLockOwner(owner, callback);
       assertSynchronousLockResult(result);
       return result;
     } finally {
-      this.locks.delete(filePath);
+      if (this.locks.get(filePath) === owner) this.locks.delete(filePath);
     }
   }
 
 
-  async lockAsync<T>(filePath: string, callback: () => T | Promise<T>, _options: FileStoreLockOptions = {}): Promise<T> {
-    if (this.locks.has(filePath)) {
-      throw new Error(`Deadlock detected: lock already held for ${filePath}`);
+  async lockAsync<T>(filePath: string, callback: () => T | Promise<T>, options: FileStoreLockOptions = {}): Promise<T> {
+    assertNotAsyncLockOwner(this.locks.get(filePath), filePath);
+    const deadline = Date.now() + (options.timeoutSeconds ?? 30) * 1000;
+    while (this.locks.has(filePath)) {
+      if (Date.now() >= deadline) {
+        throw Object.assign(new Error(`Timed out waiting for lock: ${filePath}`), { code: 'EEXIST' });
+      }
+      await sleepAsync(options.pollIntervalMs ?? 50);
     }
 
-    this.locks.add(filePath);
+    const owner = Symbol();
+    this.locks.set(filePath, owner);
     try {
-      return await callback();
+      return await withLockOwner(owner, callback);
     } finally {
-      this.locks.delete(filePath);
+      if (this.locks.get(filePath) === owner) this.locks.delete(filePath);
     }
   }
 
@@ -435,6 +443,23 @@ export class ValueError extends Error {
     super(message);
     this.name = 'ValueError';
   }
+}
+
+// A held path may belong to another request. Only the async context that owns
+// its live acquisition is recursive; independent async callers must wait. Tokens
+// are replaced for every acquisition so detached work cannot retain ownership.
+const lockOwnerContext = new AsyncLocalStorage<ReadonlySet<symbol>>();
+
+function assertNotAsyncLockOwner(owner: symbol | undefined, filePath: string): void {
+  if (owner !== undefined && lockOwnerContext.getStore()?.has(owner)) {
+    throw new Error(`Deadlock detected: lock already held for ${filePath}`);
+  }
+}
+
+function withLockOwner<T>(owner: symbol, callback: () => T): T {
+  const owners = new Set(lockOwnerContext.getStore());
+  owners.add(owner);
+  return lockOwnerContext.run(owners, callback);
 }
 
 function joinStorePath(basePath: string, childName: string): string {
