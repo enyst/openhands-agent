@@ -27,19 +27,21 @@ export interface ToolUseSuffixResult {
 
 export class AgentContext {
   readonly skills: Skill[];
+  readonly disabledSkills: readonly string[];
   readonly systemMessageSuffix: string | null;
   readonly userMessageSuffix: string | null;
   readonly secrets: Readonly<Record<string, string | { readonly description?: string | null }>> | null;
   readonly currentDatetime: Date | string | null;
 
   constructor(options: AgentContextOptions = {}) {
-    const disabled = new Set(options.disabledSkills ?? []);
+    this.disabledSkills = [...(options.disabledSkills ?? [])];
+    const disabled = new Set(this.disabledSkills);
     this.skills = (options.skills ?? []).filter((skill) => !disabled.has(skill.name));
     assertUniqueSkillNames(this.skills);
     this.systemMessageSuffix = options.systemMessageSuffix ?? null;
     this.userMessageSuffix = options.userMessageSuffix ?? null;
     this.secrets = options.secrets ?? null;
-    this.currentDatetime = options.currentDatetime ?? new Date();
+    this.currentDatetime = options.currentDatetime === undefined ? new Date() : options.currentDatetime;
   }
 
   getSecretInfos(additional: readonly SecretInfo[] = []): SecretInfo[] {

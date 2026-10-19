@@ -5,6 +5,8 @@ import { dirname, isAbsolute, resolve, sep, posix } from 'node:path';
 import { promisify } from 'node:util';
 
 import { getChangesInRepo, getGitDiff, type GitChange, type GitDiff } from '../git/index.js';
+import { AgentContext } from '../context/agent-context.js';
+import { skillSchema, type Skill } from '../skills/index.js';
 
 const execAsync = promisify(exec);
 type FetchRequestInit = NonNullable<Parameters<typeof fetch>[1]> & { readonly timeoutMs?: number };
@@ -125,6 +127,16 @@ export interface RemoteWorkspaceOptions extends LocalWorkspaceOptions {
   readonly runtime_conversation_id?: string | null;
 }
 
+export interface RemoteSkillLoadOptions {
+  readonly projectDirs?: readonly string[];
+  readonly loadPublic?: boolean;
+  readonly loadUser?: boolean;
+  readonly loadProject?: boolean;
+  readonly loadOrg?: boolean;
+  readonly timeoutSeconds?: number;
+  readonly baseContext?: AgentContext | null;
+}
+
 export class RemoteWorkspace implements BaseWorkspace {
   readonly host: string;
   readonly apiKey: string | null;
@@ -153,6 +165,90 @@ export class RemoteWorkspace implements BaseWorkspace {
     const response = await this.request('/server_info');
     const data = await response.json();
     return isRecord(data) ? data : {};
+  }
+
+  /**
+   * Load server skills, replacing the base context's skills while preserving its
+   * other fields and applying its disabledSkills deny-list. Later project
+   * directories override earlier skills with the same name.
+   *
+   * Local automatic public/user discovery is not implemented. When the server
+   * returns no usable skills (including on failure), retain the supplied context's
+   * explicit skills instead of Python's automatic public-skill fallback.
+   */
+  async loadSkillsFromAgentServer(options: RemoteSkillLoadOptions = {}): Promise<[Skill[], AgentContext]> {
+    if (!this.host || this.host === 'undefined') {
+      throw new Error('Workspace not initialized. Start the workspace before loading skills.');
+    }
+    const flags = {
+      load_public: options.loadPublic ?? true,
+      load_user: options.loadUser ?? true,
+      load_project: options.loadProject ?? true,
+      load_org: options.loadOrg ?? true,
+    };
+    const byName = new Map<string, Record<string, unknown>>();
+    const load = async (projectDir: string, selection: typeof flags): Promise<void> => {
+      const skills = await this.callSkillsApi({ ...selection, project_dir: projectDir, sandbox_config: null }, options.timeoutSeconds ?? 60);
+      for (const skill of skills) {
+        if (isRecord(skill)) {
+          const name = skill.name === undefined ? 'unknown' : skill.name;
+          if (typeof name === 'string') byName.set(name, skill);
+        }
+      }
+    };
+    if (options.projectDirs?.length) {
+      await load(this.workingDir, { ...flags, load_project: false });
+      if (flags.load_project) {
+        for (const directory of options.projectDirs) {
+          await load(directory, { load_public: false, load_user: false, load_project: true, load_org: false });
+        }
+      }
+    } else {
+      await load(this.workingDir, flags);
+    }
+    const loaded: Skill[] = [];
+    for (const data of byName.values()) {
+      const triggers = data.triggers ?? [];
+      if (!Array.isArray(triggers)) continue;
+      const trigger = Array.isArray(triggers) && triggers.length > 0
+        ? triggers.some((value) => typeof value === 'string' && value.startsWith('/'))
+          ? { type: 'task', triggers }
+          : { type: 'keyword', keywords: triggers }
+        : null;
+      const result = skillSchema.safeParse({
+        name: data.name === undefined ? 'unknown' : data.name,
+        content: data.content === undefined ? '' : data.content, trigger,
+        source: data.source, description: data.description,
+        isAgentskillsFormat: data.is_agentskills_format,
+        disableModelInvocation: data.disable_model_invocation,
+      });
+      if (result.success) loaded.push(result.data);
+    }
+    const base = options.baseContext ?? new AgentContext();
+    return [loaded, new AgentContext({ ...base, skills: loaded.length > 0 ? loaded : base.skills })];
+  }
+
+  private async callSkillsApi(payload: Record<string, unknown>, timeoutSeconds: number): Promise<unknown[]> {
+    const serverErrors = new Set(Array.from({ length: 100 }, (_, index) => 500 + index));
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await this.request('/api/skills', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload), timeoutMs: timeoutSeconds * 1000,
+        }, serverErrors);
+        if (response.ok) {
+          const data: unknown = await response.json();
+          return isRecord(data) && Array.isArray(data.skills) ? data.skills as unknown[] : [];
+        }
+        await response.body?.cancel();
+      } catch (error) {
+        const transient = error instanceof TypeError
+          || (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name));
+        if (!transient) return [];
+      }
+      if (attempt < 2) await delay(1000 * 2 ** attempt);
+    }
+    return [];
   }
 
   async executeCommand(command: string, options: { readonly cwd?: string | null; readonly timeoutSeconds?: number } = {}): Promise<WorkspaceCommandResult> {

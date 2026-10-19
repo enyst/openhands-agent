@@ -1,4 +1,6 @@
 """Run pinned Python's pure subscription transform as a deterministic TS test oracle."""
+from __future__ import annotations
+
 import ast
 import json
 import pathlib

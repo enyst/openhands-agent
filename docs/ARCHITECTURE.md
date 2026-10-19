@@ -196,6 +196,13 @@ Workspaces in `src/workspace/` separate execution substrate from agent logic:
 - `RemoteWorkspace` targets an agent-server-compatible HTTP runtime.
 - workspace factory helpers create the correct implementation from settings.
 
+`RemoteWorkspace.loadSkillsFromAgentServer()` loads remote skills and preserves a
+supplied `AgentContext`, including its disabled skills, suffixes, secret
+descriptions and explicitly absent datetime. Later project directories take
+precedence. If loading fails or returns no usable skills, the caller's explicit
+skills remain available. Automatic public/user fallback discovery is still
+deferred (`openhands-agent-wlw.4`); callers must supply those fallback skills.
+
 ## Context, skills, hooks, and MCP
 
 `AgentContext` composes repository guidance, current time, and skills into prompt suffixes. Skills support static content and keyword triggers; activated skills can contribute user-message suffixes without changing the durable event protocol.
