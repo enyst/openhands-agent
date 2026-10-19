@@ -47,11 +47,30 @@ The durable transcript is always `ConversationState.events`. `Message[]` is a te
 | LLM | `src/llm/` | Provider-neutral message/content types plus OpenAI, Responses, Anthropic, Gemini clients. |
 | Tools | `src/tool/`, `src/tools/` | Tool definitions/registry plus concrete terminal, file editor, glob, grep, task tracker, browser adapter. |
 | Workspace | `src/workspace/` | Local and remote execution/files/git substrate. |
+| Launch | `src/launch/` | Resolve immutable profile/settings snapshots, materialize native agents, preview and report diagnostics. |
 | Settings/profiles/secrets | `src/settings/`, `src/profiles/`, `src/secrets/` | Agent settings, LLM profile settings, profile hygiene, and keyring-backed secret references. |
 | Context/skills/condenser | `src/context/`, `src/skills/` | Prompt context, activated skills, and condensation views. |
 | Hooks | `src/hooks/` | Lifecycle hook configuration and hook execution results. |
 | MCP | `src/mcp/` | MCP tool wrapper definitions, action conversion, observations. |
 | Surrounding subsystems | `src/git/`, `src/critic/`, `src/subagent/`, `src/extensions/`, `src/observability/`, `src/testing/` | Supporting APIs ported where relevant for the TypeScript SDK. |
+
+## Launch, profiles and tool selection
+
+`src/launch/` resolves profile IDs or native settings into `ResolvedLaunch`, an immutable snapshot of validated settings, LLM profiles, MCP selection, skills and provenance. Missing main/MCP/meta-profile/routed/condenser references are distinguished from unreadable stores. Main and inline routed bindings stay independent even when they use the same profile name. Explicit immutable main/condenser/hard-condenser role bindings also preserve different historical configurations sharing one saved ID; role-aware client construction lets a host reuse an already prepared main client. A durable host captures auxiliary settings and bindings before finalization, preserving its publication guard and token limits. `finalizeLaunch` uses host-provided client/tool adapters without re-reading stores; ordinary and emergency condensers retain their own bindings. `previewLaunch` follows that construction path without a completion, reports unavailable tools and redacts MCP configurations and routed profile headers. Preview forwards the memory preference through the same finalizer and reports its effective native `agent_context` (camel-case AgentContext fields, credential values omitted), rather than the pre-finalization context.
+
+Agent settings use schema version 8 and agent profiles version 3. `tools: null` selects terminal, file editor, task tracker and switch-LLM; explicit `[]` keeps only unconditional finish/think. Browser tools are included only when a host provides them. Migrations fold retired booleans, preserve the effective legacy selection, validate every original router parameter set before deduplication, and retain the first parameterized duplicate. An enabled settings router replaces explicit router parameters, matching the source settings constructor. A sealed catalog snapshots declarations without constructing tools or resolving credentials; host overrides keep their identity.
+
+Finalization refreshes parseable timestamps, preserves explicit suppression/preformatted text, appends deployment suffixes in order, filters context secrets by scope, removes runtime-managed credential names, and deduplicates client tools. Memory loading requires an actual host loader. The default static prompt preserves source capability sections; a nonblank persona replaces identity sections, and loaded tools supply deduplicated guidance. Explicit inline prompts retain priority. Dynamic skills/secrets/timestamp context remains separate.
+
+Runtime gaps remain explicit: native task/workflow child execution and capability enforcement are tracked in `openhands-agent-wlw.14`; pure immutable scope comparisons and monotone tool annotations are available. Critic execution and lazy project-skill discovery are tracked in `openhands-agent-wlw.15`; enabled verification is rejected, and hosts supply discovered skills. Structured tool response schemas are tracked in `openhands-agent-wlw.16` and non-null `response_schema` is rejected until action/event/observation handling exists. These are incomplete ports, not new exclusions.
+
+## Remote restoration, text files and observability
+
+Asynchronous remote create/attach restores the complete initial paginated event history before returning, retaining arbitrary native action/observation records and opaque Python module metadata. Malformed pages/repeated cursors fail before the staged events are committed. This does not introduce Python imports, live WebSocket reconnect or client-tool execution. Remote workspaces expose a scoped, bounded `stopCommand`; missing commands are harmless.
+
+The file editor uses strict UTF-8/CP1252/Latin-1/CP1251 decoding with a pinned native detector, retries clean-text candidates for short uncertain samples, preserves the selected encoding across edits, and retains original bytes for undo. New characters outside a legacy encoding select UTF-8 rather than being replaced. Binary controls, unsupported confident codecs, and recognized unsupported non-UTF8 encodings are rejected rather than knowingly decoded as another alphabet. Native chardet and Python charset-normalizer heuristics are not identical; the concrete changed recovery cases are tested, without promising every ambiguous file receives the same guessed encoding.
+
+Observability accepts explicitly supported environment metadata, tags and parent context, plus an optional host span/header adapter. Local/remote conversations own idempotent root-span closure and report measured cost to their workspace. Workspace completion callbacks are bounded, best effort and run only on explicit close; credentials stay runtime-only. No exporter, recurring job or tracing service is installed. `src/automation/` provides reusable metadata/tag/header composition, independently of any scheduler.
 
 ## Events and messages
 
@@ -337,3 +356,5 @@ npm run typecheck:examples
 npm run test:examples
 npm pack --dry-run
 ```
+
+Raw Agent launches retain subclass and instance behavior through `Agent.withOverrides()`. Its default shallow copy preserves the prototype and own property descriptors while validating base configuration; subclasses with ECMAScript private slots override this hook to construct their own copy. A launch with no effective changes retains the original instance. ISO timestamps refresh at launch, retaining an explicit input offset unless the caller supplies `launchedAt`.

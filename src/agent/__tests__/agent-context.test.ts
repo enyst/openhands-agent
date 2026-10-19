@@ -40,7 +40,7 @@ describe('Agent context and condenser integration', () => {
 
   it('recovers softly from a content-policy block instead of hard-erroring', async () => {
     const llm: LLMClient = {
-      profile: null as never,
+      profile: llmProfileSchema.parse({ profileId: 'test', providerId: 'test', model: 'test' }),
       async complete() {
         throw new LLMContentPolicyViolationError();
       },

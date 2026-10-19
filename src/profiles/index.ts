@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
+import { foldDeprecatedToolSwitches, foldRetiredToolSwitches } from '../tool/defaults.js';
+import { persistedToolSpecsSchema } from '../tool/spec-validation.js';
 
-export const AGENT_PROFILE_SCHEMA_VERSION = 2;
+export const AGENT_PROFILE_SCHEMA_VERSION = 3;
 
 export const acpServerKindSchema = z.union([
   z.literal('claude-code'),
@@ -34,22 +36,25 @@ const agentProfileBaseFields = {
   secret_refs: z.array(z.string()).nullable().default(null),
 } as const;
 
-export const openHandsAgentProfileSchema = z
+const openHandsAgentProfileObjectSchema = z
   .object({
     ...agentProfileBaseFields,
     agent_kind: z.literal('openhands').default('openhands'),
     llm_profile_ref: z.string().min(1),
     agent: z.string().default('CodeActAgent'),
-    tools: z.array(z.unknown()).nullable().default(null),
+    tools: persistedToolSpecsSchema.nullable().default(null),
+    persona: z.string().min(1).max(65536).nullable().default(null),
     system_message_suffix: z.string().nullable().default(null),
     disabled_skills: z.array(z.string()).default([]),
     condenser: z.unknown().default({ condenser_kind: 'llm_summarizing', enabled: true }),
     verification: profileVerificationSettingsSchema.default(defaultProfileVerificationSettings),
-    enable_sub_agents: z.boolean().default(false),
-    enable_switch_llm_tool: z.boolean().default(true),
+    enable_classify_and_switch_llm_tool: z.boolean().default(false),
+    meta_profile_ref: z.string().min(1).nullable().default(null),
     tool_concurrency_limit: z.number().int().min(1).default(1),
   })
   .strict();
+
+export const openHandsAgentProfileSchema = z.preprocess(foldDeprecatedToolSwitches, openHandsAgentProfileObjectSchema);
 
 export const acpAgentProfileSchema = z
   .object({
@@ -92,7 +97,7 @@ function applyAgentProfileMigrations(data: unknown): Record<string, unknown> {
     throw new TypeError('AgentProfile payload must be a mapping.');
   }
 
-  const migrated = { ...data };
+  let migrated = { ...data };
   const version = migrated.schema_version;
   if (version === undefined || version === null) {
     migrated.schema_version = AGENT_PROFILE_SCHEMA_VERSION;
@@ -104,6 +109,7 @@ function applyAgentProfileMigrations(data: unknown): Record<string, unknown> {
   if (version < 0) {
     throw new Error('AgentProfile schema_version must be non-negative.');
   }
+  if (version === 0) throw new Error('No migration registered for AgentProfile schema_version 0.');
   if (version > AGENT_PROFILE_SCHEMA_VERSION) {
     throw new Error(
       `AgentProfile schema_version ${version} is newer than supported version ${AGENT_PROFILE_SCHEMA_VERSION}.`,
@@ -123,6 +129,11 @@ function applyAgentProfileMigrations(data: unknown): Record<string, unknown> {
     }
     migrated.schema_version = 2;
   }
+  if (version < 3) {
+    if ((migrated.agent_kind ?? 'openhands') === 'openhands') migrated = foldRetiredToolSwitches(migrated);
+    else { delete migrated.enable_sub_agents; delete migrated.enable_switch_llm_tool; }
+  }
+  migrated.schema_version = AGENT_PROFILE_SCHEMA_VERSION;
   return migrated;
 }
 

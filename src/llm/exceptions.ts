@@ -53,6 +53,14 @@ export class LLMBudgetExceededError extends LLMRateLimitError {
   }
 }
 
+/** A deadline owned by a native completion attempt, not a provider's opaque error. */
+export class LLMTimeoutError extends Error {
+  constructor(readonly kind: 'hard' | 'idle') {
+    super(kind === 'hard' ? 'The LLM completion attempt timed out.' : 'The LLM stream became idle.');
+    this.name = 'LLMTimeoutError';
+  }
+}
+
 export class LLMConnectionError extends Error {
   constructor() {
     super('The LLM provider connection failed.');
@@ -66,7 +74,7 @@ export function isLLMAuthenticationError(error: unknown): boolean {
 
 /** Only typed provider failures qualify; ordinary application errors do not. */
 export function isTransientProviderError(error: unknown): boolean {
-  return hasCause(error, value => value instanceof LLMConnectionError
+  return hasCause(error, value => value instanceof LLMTimeoutError || value instanceof LLMConnectionError
     || value instanceof LLMHttpError && !(value instanceof LLMRateLimitError && value.quotaExhausted)
       && ([408, 409, 429].includes(value.statusCode) || value.statusCode >= 500 && value.statusCode < 600));
 }

@@ -1,3 +1,4 @@
+import { supportsOpenAIPromptCacheKey, type PromptCacheMetadata } from './provider-quirks.js';
 import type { FetchResponseLike, LLMTokenCountTool } from './client.js';
 import type { LLMProfile, Message } from './index.js';
 import { MODEL_INPUT_LIMITS } from './model-input-limits.js';
@@ -32,6 +33,7 @@ function staticLimit(profile: LLMProfile): number | null {
 export class LLMContextBudget {
   readonly tokenCountAccuracy = 'estimate' as const;
   private resolvedLimit: number | null = null;
+  private resolvedCacheKey: boolean | undefined;
   private freshUntil = 0;
   private inflight: Promise<void> | undefined;
   constructor(private readonly profile: LLMProfile, private readonly options: ContextBudgetOptions = {}) {}
@@ -43,17 +45,29 @@ export class LLMContextBudget {
     return Promise.resolve(estimateInputTokens(this.profile.model, messages, tools));
   }
   resolveRuntimeMetadata(): Promise<void> {
-    if (this.profile.maxInputTokens !== null || Date.now() < this.freshUntil) return Promise.resolve();
+    if (Date.now() < this.freshUntil) return Promise.resolve();
     if (this.inflight) return this.inflight;
     this.inflight = this.resolve().finally(() => { this.inflight = undefined; });
     return this.inflight;
   }
+  get promptCacheMetadata(): PromptCacheMetadata | undefined {
+    return Date.now() < this.freshUntil && this.resolvedCacheKey !== undefined ? { supportsPromptCacheKey: this.resolvedCacheKey } : undefined;
+  }
+  resolvePromptCacheMetadata(): Promise<void> {
+    return this.isProxy() && this.profile.supportsPromptCacheKey === undefined ? this.resolveRuntimeMetadata() : Promise.resolve();
+  }
+  private isProxy(): boolean {
+    const host = this.profile.baseUrl ? new URL(this.profile.baseUrl).hostname : null;
+    return ['litellm_proxy', 'openhands'].includes(this.profile.providerId) || /^(?:litellm_proxy|openhands)\//u.test(this.profile.model)
+      || (host !== null && /litellm|llm-proxy/u.test(host));
+  }
   private async resolve(): Promise<void> {
     this.resolvedLimit = null;
+    this.resolvedCacheKey = undefined;
     const profile = this.profile;
     const host = profile.baseUrl ? new URL(profile.baseUrl).hostname : null;
     const openrouter = (profile.providerId === 'openrouter' && (!host || host === 'openrouter.ai')) || host === 'openrouter.ai';
-    const proxy = profile.providerId === 'litellm_proxy' || profile.model.startsWith('litellm_proxy/') || (host !== null && /litellm|llm-proxy/u.test(host));
+    const proxy = this.isProxy();
     let url: string | null = null;
     if (openrouter && profile.model.includes('/')) url = `https://openrouter.ai/api/v1/models/${profile.model.replace(/^openrouter\//u, '').split('/').map(encodeURIComponent).join('/')}/endpoints`;
     if (proxy && profile.baseUrl) url = `${profile.baseUrl.replace(/\/v1\/?$|\/$/u, '')}/v1/model/info`;
@@ -77,16 +91,23 @@ export class LLMContextBudget {
           this.resolvedLimit = limits.length ? Math.min(...limits) : null;
         }
       } else if (Array.isArray(data)) {
-        const model = profile.model.replace(/^litellm_proxy\//u, '');
+        const model = profile.model.replace(/^(?:litellm_proxy|openhands)\//u, '');
         const matches = data.map(record).filter(item => item.model_name === model || record(item.litellm_params).model === model);
+        if (matches.length) this.resolvedCacheKey = matches.every(item => {
+          const info = record(item.model_info);
+          return supportsOpenAIPromptCacheKey(profile, {
+            ...(typeof info.litellm_provider === 'string' ? { servingProvider: info.litellm_provider } : {}),
+            ...(typeof info.supports_prompt_cache_key === 'boolean' ? { supportsPromptCacheKey: info.supports_prompt_cache_key } : {}),
+          });
+        });
         const limits = matches.map(item => positiveLimit(record(item.model_info).max_input_tokens));
         // Multiple deployments of an alias may have different context windows.
         this.resolvedLimit = limits.length && limits.every((value): value is number => value !== null) ? Math.min(...limits) : null;
       }
-    } catch { this.resolvedLimit = null; }
+    } catch { this.resolvedLimit = null; this.resolvedCacheKey = undefined; }
     finally {
       if (timer !== undefined) clearTimeout(timer);
-      this.freshUntil = Date.now() + (this.resolvedLimit === null ? 300_000 : 3_600_000);
+      this.freshUntil = Date.now() + (this.resolvedLimit === null && this.resolvedCacheKey === undefined ? 300_000 : 3_600_000);
     }
   }
 }

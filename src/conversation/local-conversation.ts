@@ -1,10 +1,13 @@
+import { startConversationSpan, endRootSpan, type RootSpan, type ConversationObservabilityOptions } from '../observability/index.js';
+import type { WorkspaceCompletionRegistration } from '../workspace/completion-callback.js';
+import { metricsSnapshot } from '../llm/metrics.js';
 import { randomUUID } from 'node:crypto';
 
 import { condensationRequestSchema, conversationErrorEventSchema, messageEventSchema, type Event } from '../event/index.js';
 import { LocalFileStore, type FileStore } from '../io/index.js';
 import { textContent } from '../llm/index.js';
 import { getLLMCallContext, withLLMCallContext, type LLMCallContext } from '../llm/call-context.js';
-import { isLLMAuthenticationError } from '../llm/exceptions.js';
+import { isLLMAuthenticationError, LLMTimeoutError } from '../llm/exceptions.js';
 import { LLMUsagePersistenceError } from '../llm/usage-persistence.js';
 import type { Agent } from '../agent/index.js';
 import { AgentResetCondenser, AgentControlledCondensationError } from '../context/agent-reset-condenser.js';
@@ -13,7 +16,8 @@ import { ConversationState, conversationExecutionStatus } from './state.js';
 import { StuckDetector, type StuckDetectionThresholds } from './stuck-detector.js';
 import { applyAgentStepBoundary, type AgentStepBoundary } from './ext/step-boundary.js';
 
-export interface LocalConversationOptions {
+export interface LocalConversationOptions extends ConversationObservabilityOptions {
+  readonly workspace?: WorkspaceCompletionRegistration;
   readonly agent: Agent;
   readonly state?: ConversationState;
   readonly maxIterations?: number;
@@ -28,6 +32,9 @@ export interface LocalConversationOptions {
 }
 
 export class LocalConversation {
+  private readonly rootSpan: RootSpan | null;
+  private readonly workspace: WorkspaceCompletionRegistration | undefined;
+  private closed = false;
   private activeAgent: Agent;
   private readonly onStepBoundary: AgentStepBoundary | undefined;
   private runInProgress: Promise<void> | null = null;
@@ -51,6 +58,16 @@ export class LocalConversation {
     this.state = options.state ?? createConversationState(options, hasPersistentStore(options) ? this.conversationId : null);
     this.maxIterations = options.maxIterations ?? 500;
     this.stuckDetector = createStuckDetector(this.state, options.stuckDetection);
+    this.workspace = options.workspace;
+    this.workspace?.registerConversation(this.conversationId);
+    this.rootSpan = startConversationSpan(this.conversationId, options);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    try { this.workspace?.registerCost(metricsSnapshot(this.state.stats).accumulated_cost); } catch { /* Best effort callback accounting. */ }
+    endRootSpan(this.rootSpan);
   }
 
   getLLMCallContext(): LLMCallContext { return this.callContext; }
@@ -94,6 +111,12 @@ export class LocalConversation {
         await this.state.appendEventAsync(conversationErrorEventSchema.parse({
           source: 'environment', code: 'LLMAuthenticationError',
           detail: 'Your LLM API key appears to be invalid or has expired.',
+        }));
+      } else if (hasNativeTimeoutCause(error)) {
+        this.state.executionStatus = conversationExecutionStatus.ERROR;
+        await this.state.appendEventAsync(conversationErrorEventSchema.parse({
+          source: 'environment', code: 'LLMTimeoutError',
+          detail: 'The LLM completion exceeded its configured deadline.',
         }));
       }
       throw error;
@@ -211,6 +234,16 @@ export class LocalConversation {
     }
   }
 
+}
+
+function hasNativeTimeoutCause(error: unknown): boolean {
+  const seen = new Set<Error>();
+  while (error instanceof Error && !seen.has(error)) {
+    if (error instanceof LLMTimeoutError) return true;
+    seen.add(error);
+    error = error.cause;
+  }
+  return false;
 }
 
 function hasPersistentStore(options: LocalConversationOptions): boolean {

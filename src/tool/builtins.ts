@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { registerBuiltinResolver, ToolDefinition, toolAnnotationsSchema, type ToolAnnotations } from './index.js';
+import { NATIVE_TOOL_MODULE_QUALNAMES } from './module-qualnames.js';
 import { SwitchLLMTool } from './switch-llm.js';
 
 export * from './switch-llm.js';
@@ -102,5 +103,5 @@ export const BUILT_IN_TOOL_FACTORIES = {
 // Register built-ins with the global registry by *tool* name (not class name),
 // matching upstream ``BUILT_IN_TOOL_CLASSES`` fallback resolution keyed on the
 // resolved ``ToolDefinition.name`` ('finish', 'think').
-registerBuiltinResolver('finish', () => [FinishTool.create()]);
-registerBuiltinResolver('think', () => [ThinkTool.create()]);
+for (const name of ['finish', 'FinishTool']) registerBuiltinResolver(name, () => [FinishTool.create()], { canonicalName: 'finish', userSelectable: false, moduleQualname: NATIVE_TOOL_MODULE_QUALNAMES.finish });
+for (const name of ['think', 'ThinkTool']) registerBuiltinResolver(name, () => [ThinkTool.create()], { canonicalName: 'think', userSelectable: false, moduleQualname: NATIVE_TOOL_MODULE_QUALNAMES.think });

@@ -1,3 +1,4 @@
+import { ResponseReadFailure } from './request-deadlines.js';
 import { isLLMAuthenticationError, isTransientProviderError } from './exceptions.js';
 
 export type ApiKeyRefreshHook = () => string | null | Promise<string | null>;
@@ -16,7 +17,7 @@ export interface LLMRequestOptions {
   readonly retry?: LLMRetryOptions;
 }
 
-/** Only wrap transport + HTTP rejection, never response parsing or emitted SSE. */
+/** Retry transport/HTTP failures and owned deadlines, never parsing or terminal SSE failures. */
 export async function requestWithRecovery<T>(
   apiKey: string,
   options: LLMRequestOptions,
@@ -33,6 +34,7 @@ export async function requestWithRecovery<T>(
   while (true) {
     try { return await request(key, refreshed); }
     catch (error) {
+      if (error instanceof ResponseReadFailure) throw error.original;
       if (allowAuthRefresh && !refreshed && options.apiKeyRefreshHook && isLLMAuthenticationError(error)) {
         let replacement: string | null = null;
         try { replacement = await options.apiKeyRefreshHook(); } catch { /* Keep the original authentication failure. */ }

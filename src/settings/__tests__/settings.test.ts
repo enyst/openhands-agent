@@ -59,7 +59,7 @@ describe('AgentSettings', () => {
     expect(settings.agent_kind).toBe('openhands');
     expect(settings.agent).toBe('CodeActAgent');
     expect(settings.llm_profile_ref).toBe('default');
-    expect(settings.tools).toEqual([{ name: 'TerminalTool' }]);
+    expect(settings.tools).toEqual([{ name: 'TerminalTool', params: {} }, { name: 'task_tool_set', params: {} }]);
     expect(settings.tool_concurrency_limit).toBe(3);
     expect(JSON.stringify(settings)).not.toMatch(/api[_-]?key|"llm"/iu);
   });
@@ -84,12 +84,11 @@ describe('AgentSettings', () => {
       'agent_kind',
       'condenser',
       'enable_classify_and_switch_llm_tool',
-      'enable_sub_agents',
-      'enable_switch_llm_tool',
       'llm_profile_ref',
       'mcp_config',
       'meta_profile',
       'meta_profile_llms',
+      'persona',
       'schema_version',
       'tool_concurrency_limit',
       'tools',
@@ -186,7 +185,7 @@ describe('AgentSettings', () => {
 
   it('returns profile-first defaults', () => {
     expect(defaultAgentSettings('default').llm_profile_ref).toBe('default');
-    expect(defaultAgentSettings('default').enable_switch_llm_tool).toBe(true);
+    expect(defaultAgentSettings('default').tools).toBeNull();
   });
 
   it('preserves the tools tri-state (null = SDK default vs empty list vs explicit list)', () => {
@@ -196,7 +195,7 @@ describe('AgentSettings', () => {
 
     expect(defaulted.tools).toBeNull();
     expect(bare.tools).toEqual([]);
-    expect(explicit.tools).toEqual([{ name: 'terminal' }]);
+    expect(explicit.tools).toEqual([{ name: 'terminal', params: {} }]);
     expect(openHandsAgentSettingsSchema.parse(JSON.parse(JSON.stringify(defaulted))).tools).toBeNull();
   });
 });

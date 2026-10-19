@@ -74,7 +74,7 @@ describe('RemoteConversation', () => {
       fetch,
     });
 
-    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls).toHaveLength(2);
     expect(fetch.calls[0]).toMatchObject({ url: 'https://agent.example/api/conversations', method: 'POST' });
     expect(JSON.parse(fetch.calls[0]?.body ?? '{}')).toEqual({
       workspace: { kind: 'LocalWorkspace', working_dir: '/workspace' },
@@ -91,6 +91,7 @@ describe('RemoteConversation', () => {
 
     expect(fetch.calls.map((call) => `${call.method} ${call.url}`)).toEqual([
       'GET https://agent.example/api/conversations/00000000-0000-0000-0000-000000000003',
+      'GET https://agent.example/api/conversations/00000000-0000-0000-0000-000000000003/events/search?limit=100',
     ]);
     expect(conversation.id).toBe('00000000-0000-0000-0000-000000000003');
     expect(conversation.state.executionStatus).toBe(conversationExecutionStatus.FINISHED);
@@ -128,7 +129,7 @@ class FakeRemoteFetch implements RemoteFetchLike {
 
   async request(url: string, init: { readonly method: string; readonly headers?: Readonly<Record<string, string>>; readonly body?: string }): Promise<RemoteFetchResponseLike> {
     this.calls.push({ url, method: init.method, body: init.body ?? null });
-    const response = this.responses.shift();
+    const response = url.includes('/events/search') ? { status: 200, body: { items: [], next_page_id: null } } : this.responses.shift();
     if (response === undefined) {
       throw new Error('FakeRemoteFetch exhausted');
     }

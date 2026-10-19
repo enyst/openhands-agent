@@ -1,5 +1,5 @@
 import { exec } from 'node:child_process';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve, sep, posix } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -7,7 +7,11 @@ import { z } from 'zod';
 
 import { ToolDefinition, toolAnnotationsSchema } from '../tool/index.js';
 import { maybeTruncate } from '../utils/index.js';
+import { FileEncodingManager } from './file-encoding.js';
+import type { EncodedTextFile, FileEncodingDetector } from './file-encoding.js';
 import { MAX_CMD_OUTPUT_SIZE, terminalMetadataSchema } from './terminal-observation.js';
+export { FileEncodingManager, detectFileEncoding } from './file-encoding.js';
+export type { EncodedTextFile, FileEncodingDetector, FileEncodingGuess, FileTextEncoding } from './file-encoding.js';
 export { MAX_CMD_OUTPUT_SIZE, terminalMetadataSchema } from './terminal-observation.js';
 
 const execAsync = promisify(exec);
@@ -81,12 +85,20 @@ export const fileEditorActionSchema = z.object({ command: z.enum(['view', 'creat
 export const fileEditorObservationSchema = baseToolObservationSchema.extend({ command: z.enum(['view', 'create', 'str_replace', 'insert', 'undo_edit']), path: z.string().nullable().default(null), prev_exist: z.boolean().default(true), old_content: z.string().nullable().default(null), new_content: z.string().nullable().default(null) }).strict();
 export type FileEditorAction = z.infer<typeof fileEditorActionSchema>;
 export type FileEditorObservation = z.infer<typeof fileEditorObservationSchema>;
+export interface FileEditorOptions {
+  readonly workspaceRoot?: string | null;
+  readonly encodingDetector?: FileEncodingDetector;
+}
 
 export class FileEditorExecutor {
-  private readonly history = new Map<string, string[]>();
+  private readonly history = new Map<string, EncodedTextFile[]>();
+  private readonly encodingManager: FileEncodingManager;
   /** Workspace context retained for callers; filesystem access follows host permissions. */
   readonly workspaceRoot: string | null;
-  constructor(options: { readonly workspaceRoot?: string | null } = {}) { this.workspaceRoot = options.workspaceRoot ? resolve(options.workspaceRoot) : null; }
+  constructor(options: FileEditorOptions = {}) {
+    this.workspaceRoot = options.workspaceRoot ? resolve(options.workspaceRoot) : null;
+    this.encodingManager = new FileEncodingManager(options.encodingDetector);
+  }
   async execute(action: FileEditorAction): Promise<FileEditorObservation> {
     const parsed = fileEditorActionSchema.parse(action);
     const path = resolve(parsed.path);
@@ -103,19 +115,20 @@ export class FileEditorExecutor {
   private async view(path: string, action: FileEditorAction): Promise<FileEditorObservation> {
     const info = await stat(path);
     if (info.isDirectory()) return this.observation({ text: (await listDirectory(path)).join('\n'), is_error: false, command: action.command, path });
-    const numbered = numberLines(await readFile(path, 'utf8'), action.view_range);
+    const numbered = numberLines((await this.encodingManager.read(path)).text, action.view_range);
     return this.observation({ text: numbered, is_error: false, command: action.command, path });
   }
   private async create(path: string, action: FileEditorAction): Promise<FileEditorObservation> {
     if (action.file_text === null) throw new Error('file_text is required for create');
     if (await exists(path)) throw new Error(`File already exists: ${path}`);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, action.file_text);
+    await this.encodingManager.create(path, action.file_text);
     return this.observation({ text: `File created: ${path}`, is_error: false, command: action.command, path, prev_exist: false, new_content: action.file_text });
   }
   private async strReplace(path: string, action: FileEditorAction): Promise<FileEditorObservation> {
     if (action.old_str === null) throw new Error('old_str is required for str_replace');
-    const oldContent = await readFile(path, 'utf8');
+    const previous = await this.encodingManager.read(path);
+    const oldContent = previous.text;
     let oldStr = action.old_str;
     let count = countOccurrences(oldContent, oldStr);
     if (count === 0) {
@@ -127,37 +140,39 @@ export class FileEditorExecutor {
       if (count === 0) throw new Error('old_str was not found in the file');
     }
     if (count > 1) throw new Error('old_str appears multiple times; provide a unique match');
-    this.pushHistory(path, oldContent);
     const newContent = oldContent.replace(oldStr, action.new_str ?? '');
-    await writeFile(path, newContent);
+    await this.encodingManager.write(path, newContent, previous);
+    this.pushHistory(path, previous);
     return this.observation({ text: `Edited ${path}`, is_error: false, command: action.command, path, old_content: oldContent, new_content: newContent });
   }
   private async insert(path: string, action: FileEditorAction): Promise<FileEditorObservation> {
     if (action.insert_line === null || action.new_str === null) throw new Error('insert_line and new_str are required for insert');
-    const oldContent = await readFile(path, 'utf8');
-    this.pushHistory(path, oldContent);
+    const previous = await this.encodingManager.read(path);
+    const oldContent = previous.text;
     const lines = oldContent.split('\n');
     lines.splice(action.insert_line, 0, action.new_str);
     const newContent = normalizeTrailingNewline(lines.join('\n'), oldContent);
-    await writeFile(path, newContent);
+    await this.encodingManager.write(path, newContent, previous);
+    this.pushHistory(path, previous);
     return this.observation({ text: `Inserted text into ${path}`, is_error: false, command: action.command, path, old_content: oldContent, new_content: newContent });
   }
   private async undo(path: string, action: FileEditorAction): Promise<FileEditorObservation> {
     const stack = this.history.get(path) ?? [];
-    const previous = stack.pop();
+    const previous = stack.at(-1);
     if (previous === undefined) throw new Error(`No edit history for ${path}`);
-    const oldContent = await readFile(path, 'utf8').catch(() => '');
-    await writeFile(path, previous);
-    return this.observation({ text: `Undid last edit for ${path}`, is_error: false, command: action.command, path, old_content: oldContent, new_content: previous });
+    const oldContent = await this.encodingManager.read(path).then((file) => file.text).catch(() => '');
+    await this.encodingManager.restore(path, previous);
+    stack.pop();
+    return this.observation({ text: `Undid last edit for ${path}`, is_error: false, command: action.command, path, old_content: oldContent, new_content: previous.text });
   }
   private observation(partial: Omit<Partial<FileEditorObservation>, 'text' | 'command'> & Pick<FileEditorObservation, 'text' | 'command'>): FileEditorObservation {
     return fileEditorObservationSchema.parse({ path: null, prev_exist: true, old_content: null, new_content: null, ...partial });
   }
-  private pushHistory(path: string, content: string): void { this.history.set(path, [...(this.history.get(path) ?? []), content]); }
+  private pushHistory(path: string, content: EncodedTextFile): void { this.history.set(path, [...(this.history.get(path) ?? []), content]); }
 }
 
 export class FileEditorTool {
-  static create(options: { readonly workspaceRoot?: string | null } = {}): ToolDefinition<typeof fileEditorActionSchema, typeof fileEditorObservationSchema> {
+  static create(options: FileEditorOptions = {}): ToolDefinition<typeof fileEditorActionSchema, typeof fileEditorObservationSchema> {
     const executor = new FileEditorExecutor(options);
     return new ToolDefinition({ name: 'file_editor', description: 'View and edit text files with create, replace, insert, and undo operations.', inputSchema: fileEditorActionSchema, outputSchema: fileEditorObservationSchema, annotations: toolAnnotationsSchema.parse({ title: 'file_editor', destructiveHint: true, openWorldHint: false }), executor: (action) => executor.execute(action) });
   }
@@ -221,35 +236,7 @@ export class GrepTool {
   }
 }
 
-export const taskItemSchema = z.object({ title: z.string(), notes: z.string().default(''), status: z.enum(['todo', 'in_progress', 'done']).default('todo') }).strict();
-export const taskTrackerActionSchema = z.object({ command: z.enum(['view', 'plan']).default('view'), task_list: z.array(taskItemSchema).default([]) }).strict();
-export const taskTrackerObservationSchema = baseToolObservationSchema.extend({ command: z.enum(['view', 'plan']), task_list: z.array(taskItemSchema).default([]) }).strict();
-export type TaskItem = z.infer<typeof taskItemSchema>;
-export type TaskTrackerAction = z.infer<typeof taskTrackerActionSchema>;
-export type TaskTrackerObservation = z.infer<typeof taskTrackerObservationSchema>;
-
-export class TaskTrackerExecutor {
-  private taskList: TaskItem[] = [];
-  readonly saveDir: string | null;
-  constructor(options: { readonly saveDir?: string | null } = {}) { this.saveDir = options.saveDir ?? null; }
-  async execute(action: TaskTrackerAction): Promise<TaskTrackerObservation> {
-    const parsed = taskTrackerActionSchema.parse(action);
-    if (parsed.command === 'plan') {
-      this.taskList = parsed.task_list;
-      if (this.saveDir !== null) await this.saveTasks();
-      return { text: `Task list has been updated with ${this.taskList.length} item(s).`, is_error: false, command: 'plan', task_list: this.taskList };
-    }
-    return { text: this.taskList.length === 0 ? 'No task list found. Use the "plan" command to create one.' : formatTasks(this.taskList), is_error: false, command: 'view', task_list: this.taskList };
-  }
-  private async saveTasks(): Promise<void> { if (this.saveDir === null) return; await mkdir(this.saveDir, { recursive: true }); await writeFile(join(this.saveDir, 'TASKS.md'), formatTasks(this.taskList)); }
-}
-
-export class TaskTrackerTool {
-  static create(options: { readonly saveDir?: string | null } = {}): ToolDefinition<typeof taskTrackerActionSchema, typeof taskTrackerObservationSchema> {
-    const executor = new TaskTrackerExecutor(options);
-    return new ToolDefinition({ name: 'task_tracker', description: 'View or update a structured task list.', inputSchema: taskTrackerActionSchema, outputSchema: taskTrackerObservationSchema, annotations: toolAnnotationsSchema.parse({ title: 'task_tracker', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }), executor: (action) => executor.execute(action) });
-  }
-}
+export * from '../tool/task-tracker.js';
 
 export const browserActionSchema = z.object({ command: z.enum(['navigate', 'get_state', 'click', 'type', 'scroll', 'back']), url: z.string().nullable().default(null), index: z.number().int().nullable().default(null), text: z.string().nullable().default(null), direction: z.enum(['up', 'down']).default('down') }).strict();
 export const browserObservationSchema = baseToolObservationSchema;
@@ -284,5 +271,4 @@ function numberLines(content: string, range: readonly number[] | null): string {
 function normalizeTrailingNewline(content: string, oldContent: string): string { return oldContent.endsWith('\n') && !content.endsWith('\n') ? `${content}\n` : content; }
 async function walkFiles(root: string): Promise<string[]> { const result: string[] = []; async function walk(dir: string): Promise<void> { for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) { if (entry.name === 'node_modules' || entry.name.startsWith('.git')) continue; const path = join(dir, entry.name); if (entry.isDirectory()) await walk(path); else if (entry.isFile()) result.push(path); } } await walk(root); return result.sort(); }
 function globMatch(pattern: string, relativePath: string): boolean { const normalized = relativePath.split(sep).join(posix.sep); const escaped = pattern.split(/[\\/]/u).map((part) => part.replace(/[.+^${}()|[\]\\]/gu, '\\$&').replace(/\*/gu, '[^/]*')).join('/'); return new RegExp(`(^|/)${escaped}$`, 'u').test(normalized); }
-function formatTasks(tasks: readonly TaskItem[]): string { return `# Task List\n\n${tasks.map((task, index) => `${index + 1}. [${task.status}] ${task.title}${task.notes ? `\n   Notes: ${task.notes}` : ''}`).join('\n')}`; }
 

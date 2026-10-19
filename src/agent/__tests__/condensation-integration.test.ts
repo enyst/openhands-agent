@@ -29,7 +29,7 @@ describe('source integration condensation contracts', () => {
       history.push(action, observationEventSchema.parse({ action_id: action.id, tool_name: 'terminal', tool_call_id: action.tool_call_id, observation: { text: String(i), is_error: false } }));
     }
     const summary = summaryClient(), main = { profile, complete: vi.fn(async () => ({ usage: null, message: messageSchema.parse({ role: 'assistant', content: 'Loop complete.' }) })) };
-    const conversation = new LocalConversation({ state: new ConversationState({ events: history }), agent: new Agent({ llm: main, condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: 6, keepFirst: 1, minimumProgress: 0.2 }) }) });
+    const conversation = new LocalConversation({ state: new ConversationState({ events: history }), agent: new Agent({ systemPrompt: 'Test agent.', llm: main, condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: 6, keepFirst: 1, minimumProgress: 0.2 }) }) });
     await conversation.run();
     expect(main.complete).toHaveBeenCalledTimes(1);
     expect(summary.complete).not.toHaveBeenCalled();
@@ -58,7 +58,7 @@ describe('source integration condensation contracts', () => {
       return response;
     });
     const main = { profile, complete, getTokenCount: async (messages: readonly Message[]) => 40 + Math.ceil(JSON.stringify(messages).length / 4) };
-    const conversation = new LocalConversation({ agent: new Agent({ llm: main, tools: [terminal, FinishTool.create()], condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: mode === 'events' ? 10 : 1000, maxTokens: mode === 'tokens' ? 700 : null, keepFirst: 1 }) }), maxIterations: 15 });
+    const conversation = new LocalConversation({ agent: new Agent({ systemPrompt: 'Test agent.', llm: main, tools: [terminal, FinishTool.create()], condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: mode === 'events' ? 10 : 1000, maxTokens: mode === 'tokens' ? 700 : null, keepFirst: 1 }) }), maxIterations: 15 });
     for (let turn = 1; turn <= 3; turn++) { conversation.sendMessage(`Echo ${turn} and finish.`); await conversation.run(); }
     const condensations = conversation.state.events.filter(event => event.kind === 'Condensation');
     expect(condensations.length).toBeGreaterThan(0);
@@ -80,7 +80,7 @@ describe('source integration condensation contracts', () => {
         : toolResponse(calls, calls % 2 === 0 ? 'terminal' : 'finish', calls % 2 === 0 ? { command: 'echo 1' } : { message: 'done' });
     }) };
     const terminal = new ToolDefinition({ name: 'terminal', description: 'Fixture echo', inputSchema: z.object({ command: z.string() }), executor: () => ({ text: '1', is_error: false }) });
-    const conversation = new LocalConversation({ agent: new Agent({ llm: main, tools: [terminal, FinishTool.create()], condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: 100, keepFirst: 4 }) }) });
+    const conversation = new LocalConversation({ agent: new Agent({ systemPrompt: 'Test agent.', llm: main, tools: [terminal, FinishTool.create()], condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: 100, keepFirst: 4 }) }) });
     conversation.sendMessage('Echo hello world.');
     await conversation.run();
     await conversation.condense();
@@ -107,7 +107,7 @@ describe('source integration condensation contracts', () => {
       return toolResponse(complete.mock.calls.length, 'finish', { message: 'continued after reduction' });
     });
     const original = Array.from({ length: 6 }, (_, i) => user(`Task ${i}: ${'x'.repeat(90)}`));
-    const conversation = new LocalConversation({ state: new ConversationState({ events: original }), agent: new Agent({ llm: { profile, complete }, tools: [FinishTool.create()], condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: 1000, keepFirst: 0 }) }), maxIterations: 10 });
+    const conversation = new LocalConversation({ state: new ConversationState({ events: original }), agent: new Agent({ systemPrompt: 'Test agent.', llm: { profile, complete }, tools: [FinishTool.create()], condenser: new LLMSummarizingCondenser({ llm: summary, maxSize: 1000, keepFirst: 0 }) }), maxIterations: 10 });
     await conversation.run();
     expect(conversation.state.events.filter(event => event.kind === 'CondensationRequest')).toHaveLength(1);
     expect(conversation.state.events.filter(event => event.kind === 'Condensation')).toHaveLength(1);

@@ -14,7 +14,7 @@ export interface FetchResponseLike {
 
 export type FetchLike = (
   url: string,
-  init: { readonly method: 'POST'; readonly headers: Readonly<Record<string, string>>; readonly body: string },
+  init: { readonly method: 'POST'; readonly headers: Readonly<Record<string, string>>; readonly body: string; readonly signal?: AbortSignal },
 ) => Promise<FetchResponseLike>;
 
 /** Stored SystemPromptEvent tools and executable tool definitions share a count boundary. */

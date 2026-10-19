@@ -234,11 +234,12 @@ export function getAgentFactory(name: string | null | undefined): AgentFactory {
   return factory;
 }
 
-export function getFactoryInfo(): string {
-  if (agentFactories.size === 0) {
+export function getFactoryInfo(include?: (definition: AgentDefinition) => boolean): string {
+  const factories = [...agentFactories.entries()].filter(([, factory]) => include?.(factory.definition) ?? true);
+  if (factories.length === 0) {
     return '- No user-registered agents yet. Call registerAgent(...) to add custom agents.';
   }
-  return [...agentFactories.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, factory]) => {
+  return factories.sort(([left], [right]) => left.localeCompare(right)).map(([name, factory]) => {
     const tools = factory.definition.tools.length > 0 ? ` (tools: ${factory.definition.tools.join(', ')})` : '';
     return `- **${name}**: ${factory.definition.description}${tools}`;
   }).join('\n');

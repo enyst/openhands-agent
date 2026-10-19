@@ -12,7 +12,7 @@ function transport(info: unknown = { id: ID, execution_status: 'idle' }) {
   const calls: { method: string; url: string; body: Record<string, unknown> }[] = [];
   const fetch: RemoteFetchLike = { async request(url, init) {
     calls.push({ url, method: init.method, body: JSON.parse(init.body ?? '{}') });
-    return { ok: true, status: 200, json: async () => info, text: async () => JSON.stringify(info) };
+    return { ok: true, status: 200, json: async () => url.includes('/events/search') ? { items: [], next_page_id: null } : info, text: async () => JSON.stringify(info) };
   } };
   return { fetch, calls };
 }

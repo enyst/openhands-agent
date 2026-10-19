@@ -7,6 +7,8 @@
 export const VERSION = '0.4.0';
 
 export * from './agent/index.js';
+export * from './automation/index.js';
+export * from './launch/index.js';
 export * from './conversation/index.js';
 export * from './context/index.js';
 export * from './critic/index.js';
@@ -51,8 +53,11 @@ export * from './observability/index.js';
 export * from './settings/index.js';
 export * from './skills/index.js';
 export * from './subagent/index.js';
+export * from './subagent/scope.js';
 export * from './testing/index.js';
 export * from './tool/index.js';
+export * from './tool/defaults.js';
+export * from './tool/spec-validation.js';
 export * from './tool/builtins.js';
 export * from './tool/condense.js';
 export * from './tool/classify-and-switch-llm.js';

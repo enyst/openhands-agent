@@ -7,3 +7,5 @@ export * from './condenser-prompt.js';
 
 export * from './agent-reset-condenser.js';
 export { DEFAULT_CONTEXT_WARNING_THRESHOLDS, contextWarningThresholdsSchema } from './context-warnings.js';
+
+export * from './persona.js';

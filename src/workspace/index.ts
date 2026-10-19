@@ -8,6 +8,10 @@ import { getChangesInRepo, getGitDiff, type GitChange, type GitDiff } from '../g
 import { AgentContext } from '../context/agent-context.js';
 import { skillSchema, type Skill } from '../skills/index.js';
 
+import { observabilityHeadersFromEnv, type ObservabilityRuntime } from '../observability/index.js';
+import { WorkspaceCompletion, type CompletionCallbackRuntime } from './completion-callback.js';
+export type { CompletionCallbackRuntime, WorkspaceCompletionRegistration } from './completion-callback.js';
+
 const execAsync = promisify(exec);
 type FetchRequestInit = NonNullable<Parameters<typeof fetch>[1]> & { readonly timeoutMs?: number };
 
@@ -44,16 +48,25 @@ export interface BaseWorkspace {
 }
 
 export interface LocalWorkspaceOptions {
+  readonly completionCallback?: CompletionCallbackRuntime;
+  readonly observability?: ObservabilityRuntime;
   readonly workingDir?: string;
   readonly working_dir?: string;
 }
 
 export class LocalWorkspace implements BaseWorkspace {
   readonly workingDir: string;
+  private readonly completion: WorkspaceCompletion;
 
   constructor(options: LocalWorkspaceOptions = {}) {
+    this.completion = new WorkspaceCompletion(options.completionCallback);
     this.workingDir = resolve(options.workingDir ?? options.working_dir ?? 'workspace/project');
   }
+
+  registerConversation(id: string): void { this.completion.registerConversation(id); }
+  registerCost(cost: number | null): void { this.completion.registerCost(cost); }
+  get accumulatedCost(): number | null { return this.completion.accumulatedCost; }
+  async close(error?: unknown): Promise<void> { await this.completion.close(error); }
 
   async executeCommand(command: string, options: { readonly cwd?: string | null; readonly timeoutSeconds?: number } = {}): Promise<WorkspaceCommandResult> {
     const cwd = options.cwd === undefined || options.cwd === null ? this.workingDir : this.resolvePath(options.cwd);
@@ -138,6 +151,8 @@ export interface RemoteSkillLoadOptions {
 }
 
 export class RemoteWorkspace implements BaseWorkspace {
+  private readonly completion: WorkspaceCompletion;
+  private readonly observability: ObservabilityRuntime;
   readonly host: string;
   readonly apiKey: string | null;
   readonly workingDir: string;
@@ -145,12 +160,19 @@ export class RemoteWorkspace implements BaseWorkspace {
   readonly runtimeConversationId: string | null;
 
   constructor(options: RemoteWorkspaceOptions) {
+    this.completion = new WorkspaceCompletion(options.completionCallback);
+    this.observability = options.observability ?? {};
     this.host = options.host.replace(/\/+$/u, '');
     this.apiKey = options.apiKey ?? options.api_key ?? null;
     this.workingDir = remotePath(options.workingDir ?? options.working_dir ?? 'workspace/project');
     this.readTimeoutSeconds = options.readTimeoutSeconds ?? options.read_timeout ?? 600;
     this.runtimeConversationId = normalizeRuntimeConversationId(options.runtimeConversationId ?? options.runtime_conversation_id ?? null);
   }
+
+  registerConversation(id: string): void { this.completion.registerConversation(id); }
+  registerCost(cost: number | null): void { this.completion.registerCost(cost); }
+  get accumulatedCost(): number | null { return this.completion.accumulatedCost; }
+  async close(error?: unknown): Promise<void> { await this.completion.close(error); }
 
   async alive(): Promise<boolean> {
     try {
@@ -354,6 +376,13 @@ export class RemoteWorkspace implements BaseWorkspace {
     return data.session_api_key;
   }
 
+  /** Stop only this managed command; already-finished and unknown IDs are no-ops. */
+  async stopCommand(commandId: string): Promise<void> {
+    const response = await this.request(`${this.apiPrefix}/bash/bash_commands/${encodeURIComponent(commandId)}/stop`,
+      { method: 'POST', timeoutMs: 60_000 }, new Set([404]));
+    await response.body?.cancel();
+  }
+
   async releaseRuntime(): Promise<void> {
     this.requireRuntimeScope();
     // A 404 means the runtime was already released; that is not an error.
@@ -445,7 +474,8 @@ export class RemoteWorkspace implements BaseWorkspace {
   }
 
   private async request(path: string, init: FetchRequestInit = {}, acceptableStatusCodes: ReadonlySet<number> = new Set()): Promise<Response> {
-    const headers = new Headers(init.headers);
+    const headers = new Headers(observabilityHeadersFromEnv(this.observability.env, this.observability.injectHeaders));
+    new Headers(init.headers).forEach((value, name) => headers.set(name, value));
     if (this.apiKey !== null) {
       headers.set('X-Session-API-Key', this.apiKey);
     }

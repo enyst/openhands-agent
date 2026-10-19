@@ -189,7 +189,7 @@ describe('TaskTrackerExecutor', () => {
       const tracker = new TaskTrackerExecutor({ saveDir: root });
       await expect(tracker.execute({ command: 'plan', task_list: [{ title: 'Ship', status: 'in_progress' }] })).resolves.toMatchObject({ task_list: [{ title: 'Ship', status: 'in_progress', notes: '' }] });
       await expect(tracker.execute({ command: 'view' })).resolves.toMatchObject({ text: expect.stringContaining('Ship') });
-      await expect(readFile(join(root, 'TASKS.md'), 'utf8')).resolves.toContain('Ship');
+      await expect(readFile(join(root, 'TASKS.json'), 'utf8')).resolves.toContain('Ship');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

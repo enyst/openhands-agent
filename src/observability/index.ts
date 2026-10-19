@@ -1,4 +1,6 @@
 export type EnvLike = Readonly<Record<string, string | undefined>>;
+export type TraceMetadataValue = string | boolean | number | readonly string[] | readonly boolean[] | readonly number[];
+export type HeaderInjector = (headers: Record<string, string>) => void;
 export type SpanType = 'DEFAULT' | 'LLM' | 'TOOL';
 
 export interface ObserveOptions {
@@ -27,7 +29,8 @@ export interface LaminarInitOptions {
 export interface RootSpanOptions {
   readonly sessionId?: string | null;
   readonly userId?: string | null;
-  readonly attributes?: Readonly<Record<string, string>> | null;
+  readonly attributes?: Readonly<Record<string, TraceMetadataValue>> | null;
+  readonly parentSpanContext?: string | null;
   readonly metadata?: Readonly<Record<string, unknown>> | null;
   readonly tags?: readonly string[] | null;
   readonly env?: EnvLike;
@@ -35,7 +38,7 @@ export interface RootSpanOptions {
 }
 
 export interface RootSpanHandle {
-  readonly setAttribute?: (key: string, value: string) => void;
+  readonly setAttribute?: (key: string, value: TraceMetadataValue) => void;
   readonly beginChild?: (name: string, tags?: readonly string[] | null) => void;
   readonly end?: () => void;
 }
@@ -53,7 +56,7 @@ export class RootSpan {
       return;
     }
     this.ended = true;
-    this.handle.end?.();
+    try { this.handle.end?.(); } catch { /* Observability is best effort. */ }
   }
 }
 
@@ -67,15 +70,14 @@ export const observabilityEnvKeys = [
 let processObservabilityEnabled = false;
 
 export function getEnv(key: string, env: EnvLike = process.env): string | undefined {
-  const value = env[key];
-  return value === '' ? undefined : value;
+  return env[key];
 }
 
 export function shouldEnableObservability(env: EnvLike = process.env): boolean {
   if (env === process.env && processObservabilityEnabled) {
     return true;
   }
-  const enabled = observabilityEnvKeys.some((key) => getEnv(key, env) !== undefined);
+  const enabled = observabilityEnvKeys.some((key) => Boolean(getEnv(key, env)));
   if (enabled && env === process.env) {
     processObservabilityEnabled = true;
   }
@@ -108,8 +110,9 @@ export function startRootSpan(name: string, options: RootSpanOptions = {}): Root
   if (!shouldEnableObservability(options.env ?? process.env) || options.spanFactory === undefined) {
     return null;
   }
+  let span: RootSpanHandle | undefined;
   try {
-    const span = options.spanFactory(name, options);
+    span = options.spanFactory(name, options);
     if (options.attributes !== undefined && options.attributes !== null) {
       for (const [key, value] of Object.entries(options.attributes)) {
         span.setAttribute?.(key, value);
@@ -117,6 +120,7 @@ export function startRootSpan(name: string, options: RootSpanOptions = {}): Root
     }
     return new RootSpan(span);
   } catch {
+    try { span?.end?.(); } catch { /* Failed initialization must not leak a root. */ }
     return null;
   }
 }
@@ -160,4 +164,93 @@ export function extractActionName(actionEvent: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export interface ObservabilityRuntime {
+  readonly env?: EnvLike;
+  readonly spanFactory?: RootSpanOptions['spanFactory'];
+  /** Optional host OpenTelemetry propagation adapter; no exporter is installed by the SDK. */
+  readonly injectHeaders?: HeaderInjector;
+}
+
+export interface ConversationObservabilityOptions {
+  readonly userId?: string | null;
+  readonly observabilityMetadata?: Readonly<Record<string, unknown>> | null;
+  readonly observabilityTags?: readonly string[] | null;
+  readonly observabilitySpanName?: string | null;
+  readonly observabilityParentSpanContext?: string | null;
+  readonly tags?: Readonly<Record<string, string>> | null;
+  readonly observability?: ObservabilityRuntime | undefined;
+}
+
+function isTraceMetadataValue(value: unknown): value is TraceMetadataValue {
+  if (typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return true;
+  return Array.isArray(value) && (value.every(item => typeof item === 'string')
+    || value.every(item => typeof item === 'boolean')
+    || value.every(item => typeof item === 'number' && Number.isFinite(item)));
+}
+
+export function cleanTraceMetadata(value: unknown): Record<string, TraceMetadataValue> {
+  return isRecord(value) ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, TraceMetadataValue] => entry[0].length > 0 && isTraceMetadataValue(entry[1]))) : {};
+}
+
+export function observabilityMetadataFromEnv(env: EnvLike = process.env): Record<string, TraceMetadataValue> {
+  try { return cleanTraceMetadata(JSON.parse(getEnv('OPENHANDS_OBSERVABILITY_METADATA', env) || '{}')); }
+  catch { return {}; }
+}
+
+export function mergeObservabilityMetadata(metadata?: Readonly<Record<string, unknown>> | null, env: EnvLike = process.env): Record<string, unknown> {
+  return { ...observabilityMetadataFromEnv(env), ...metadata };
+}
+
+export function observabilityTagsFromEnv(env: EnvLike = process.env): string[] {
+  return (getEnv('OPENHANDS_OBSERVABILITY_TAGS', env) ?? '').split(',').map(tag => tag.trim()).filter(Boolean);
+}
+
+export function defaultObservabilitySpanNameFromEnv(env: EnvLike = process.env): string | undefined {
+  return getEnv('OPENHANDS_OBSERVABILITY_SPAN_NAME', env) || undefined;
+}
+
+export function observabilityParentSpanContextFromEnv(env: EnvLike = process.env): string | undefined {
+  return getEnv('OPENHANDS_OBSERVABILITY_PARENT_SPAN_CONTEXT', env) || getEnv('LMNR_SPAN_CONTEXT', env) || undefined;
+}
+
+export function observabilityHeadersFromEnv(env: EnvLike = process.env, inject?: HeaderInjector): Record<string, string> {
+  return observabilityHeaders({ metadata: observabilityMetadataFromEnv(env), tags: observabilityTagsFromEnv(env),
+    spanName: defaultObservabilitySpanNameFromEnv(env) ?? null, parentSpanContext: observabilityParentSpanContextFromEnv(env) ?? null }, inject);
+}
+
+export function observabilityHeaders(context: { readonly metadata?: Readonly<Record<string, unknown>> | null; readonly tags?: readonly string[] | null;
+  readonly spanName?: string | null; readonly parentSpanContext?: string | null }, inject?: HeaderInjector): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (context.metadata && Object.keys(context.metadata).length > 0) headers['X-OpenHands-Observability-Metadata'] = JSON.stringify(context.metadata);
+  if (context.tags?.length) headers['X-OpenHands-Observability-Tags'] = context.tags.join(',');
+  if (context.spanName) headers['X-OpenHands-Observability-Span-Name'] = context.spanName;
+  if (context.parentSpanContext) headers['X-OpenHands-Observability-Parent-Span-Context'] = context.parentSpanContext;
+  try { inject?.(headers); } catch { /* A broken tracing adapter must not block API calls. */ }
+  return headers;
+}
+
+export function resolveConversationObservability(options: ConversationObservabilityOptions): ConversationObservabilityOptions {
+  const env = options.observability?.env ?? process.env;
+  const metadata = mergeObservabilityMetadata(options.observabilityMetadata, env);
+  const name = options.observabilitySpanName && options.observabilitySpanName !== 'conversation'
+    ? options.observabilitySpanName : defaultObservabilitySpanNameFromEnv(env);
+  const parent = options.observabilityParentSpanContext || observabilityParentSpanContextFromEnv(env);
+  return { ...options,
+    ...(Object.keys(metadata).length > 0 || (options.observabilityMetadata !== undefined && options.observabilityMetadata !== null) ? { observabilityMetadata: metadata } : {}),
+    ...(name ? { observabilitySpanName: name } : {}),
+    ...(parent ? { observabilityParentSpanContext: parent } : {}),
+  };
+}
+
+export function startConversationSpan(sessionId: string, options: ConversationObservabilityOptions): RootSpan | null {
+  const resolved = resolveConversationObservability(options);
+  const metadata = resolved.observabilityMetadata ?? {};
+  const attributes = { ...cleanTraceMetadata(metadata), ...Object.fromEntries(Object.entries(resolved.tags ?? {}).map(([key, value]) => [`conversation.tags.${key}`, value])) };
+  const root = startRootSpan('conversation', { sessionId, userId: resolved.userId ?? null, metadata, attributes,
+    tags: resolved.observabilityTags ?? null, parentSpanContext: resolved.observabilityParentSpanContext ?? null,
+    env: resolved.observability?.env ?? process.env, ...(resolved.observability?.spanFactory ? { spanFactory: resolved.observability.spanFactory } : {}) });
+  if (resolved.observabilitySpanName && resolved.observabilitySpanName !== 'conversation') startChildSpan(root, resolved.observabilitySpanName, resolved.observabilityTags);
+  return root;
 }

@@ -73,7 +73,7 @@ describe('AgentProfile schemas', () => {
     expect(migrated.tools).toBeNull();
   });
 
-  it('keeps an explicit v1 empty tools list on non-default profiles', () => {
+  it('migrates legacy v1 empty lists on non-default profiles to the standard set', () => {
     const migrated = validateAgentProfile({
       schema_version: 1,
       name: 'custom',
@@ -83,7 +83,7 @@ describe('AgentProfile schemas', () => {
     });
 
     expect(migrated.schema_version).toBe(AGENT_PROFILE_SCHEMA_VERSION);
-    expect(migrated.tools).toEqual([]);
+    expect(migrated.tools).toBeNull();
   });
 
   it('rejects cross-variant fields and unknown ACP providers', () => {
@@ -144,9 +144,9 @@ describe('AgentProfile schemas', () => {
 
     expect(defaulted.tools).toBeNull();
     expect(bare.tools).toEqual([]);
-    expect(explicit.tools).toEqual([{ name: 'terminal' }]);
+    expect(explicit.tools).toEqual([{ name: 'terminal', params: {} }]);
     expect(denied.disabled_skills).toEqual(['x', 'y']);
-    expect(defaulted.enable_switch_llm_tool).toBe(true);
+    expect(defaulted).not.toHaveProperty('enable_switch_llm_tool');
   });
 
   it('persists no raw secret fields', () => {
