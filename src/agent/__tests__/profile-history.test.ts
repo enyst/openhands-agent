@@ -34,7 +34,8 @@ function reply(label: string, tool = false): Message {
 function client(profile: LLMProfile, message: Message) {
   const calls: Message[][] = [];
   return { profile, calls, async complete(input: readonly Message[]) {
-    calls.push(structuredClone([...input]));
+    // Assertions below inspect historical turns independently of the static prompt.
+    calls.push(structuredClone(input.filter(message => message.role !== 'system')));
     // Repeated provider IDs are deliberate: provenance must be resolved in event order.
     return { message, responseId: 'repeated-response-id', usage: null };
   } };

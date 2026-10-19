@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { textContent, textContentSchema } from '../llm/index.js';
 import { registerBuiltinResolver, ToolDefinition, toolAnnotationsSchema } from './index.js';
+import { NATIVE_TOOL_MODULE_QUALNAMES } from './module-qualnames.js';
 
 export const switchLLMActionSchema = z.object({
   profile_name: z.string().describe('Name of the saved LLM profile to use for future agent steps.'),
@@ -79,10 +80,10 @@ function observation(action: SwitchLLMAction, text: string, isError: boolean, mo
   });
 }
 
-registerBuiltinResolver('switch_llm', (params, context) => {
+for (const name of ['switch_llm', 'SwitchLLMTool']) registerBuiltinResolver(name, (params, context) => {
   if (Object.keys(params).length > 0) throw new Error("SwitchLLMTool doesn't accept parameters");
   return [SwitchLLMTool.create(isSwitchBinding(context) ? context : undefined)];
-});
+}, { canonicalName: 'switch_llm', catalogDescription: 'Let the agent switch the conversation to another saved LLM profile.', moduleQualname: NATIVE_TOOL_MODULE_QUALNAMES.switch_llm });
 
 function isSwitchBinding(context: unknown): context is SwitchLLMToolOptions {
   return typeof context === 'object' && context !== null

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { access, readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve, sep, posix } from 'node:path';
 import { promisify } from 'node:util';
+import { z } from 'zod';
 
 import { redactUrlParams, redactUrlCredentialsInText as redactUrlCredentialsInTextUtil } from '../utils/index.js';
 
@@ -38,6 +39,25 @@ export interface GitCommitsPage {
   readonly commits: readonly GitCommit[];
   readonly has_more: boolean;
 }
+
+export const gitProviderRepositorySchema = z.object({
+  id: z.string(),
+  full_name: z.string(),
+  git_provider: z.string(),
+  is_public: z.boolean(),
+  stargazers_count: z.number().int().nullable().default(null),
+  pushed_at: z.string().nullable().default(null),
+  main_branch: z.string().nullable().default(null),
+});
+
+export const gitProviderRepositoryPageSchema = z.object({
+  items: z.array(gitProviderRepositorySchema),
+  next_page_id: z.string().nullable().default(null),
+  missing_token: z.boolean().default(false),
+});
+
+export type GitProviderRepository = z.infer<typeof gitProviderRepositorySchema>;
+export type GitProviderRepositoryPage = z.infer<typeof gitProviderRepositoryPageSchema>;
 
 export interface GitRepositoryMetadata {
   readonly repo_remote?: string;

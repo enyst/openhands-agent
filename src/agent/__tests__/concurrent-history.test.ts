@@ -17,7 +17,7 @@ import type { LLMCompletionResponse } from '../../llm/client.js';
 const profile = llmProfileSchema.parse({ profileId: 'test', providerId: 'anthropic', model: 'test' });
 const user = (text: string) => messageEventSchema.parse({ source: 'user', llm_message: { role: 'user', content: text } });
 const reply = (text: string): LLMCompletionResponse => ({ message: messageSchema.parse({ role: 'assistant', content: text }), usage: null, responseId: 'reused-id' });
-const texts = (messages: readonly Message[]) => messages.map(message => [message.role, message.content.map(part => part.type === 'text' ? part.text : part.type).join('|')]);
+const texts = (messages: readonly Message[]) => messages.filter(message => message.role !== 'system').map(message => [message.role, message.content.map(part => part.type === 'text' ? part.text : part.type).join('|')]);
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -97,7 +97,7 @@ describe('concurrent user messages in provider request history', () => {
     toolResult.resolve();
     await running;
     await agent.step(state);
-    const request = orderCompletedToolResults(complete.mock.calls[1]![0]);
+    const request = orderCompletedToolResults(complete.mock.calls[1]![0]).filter(message => message.role !== 'system');
     expect(request.map(message => message.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user']);
     expect(texts(request).at(-1)).toEqual(['user', 'B|C']);
     expect(request[1]!.tool_calls?.map(call => call.id)).toEqual(['call-1', 'call-2']);
@@ -130,7 +130,7 @@ describe('concurrent user messages in provider request history', () => {
     const complete = vi.fn(async (_messages: readonly Message[]) => reply('reply-B'));
     await new Agent({ llm: { profile: secondProfile, complete } }).step(state);
     expect(texts(complete.mock.calls[0]![0])).toEqual([['user', 'A'], ['assistant', 'reply-A'], ['user', 'B']]);
-    expect(complete.mock.calls[0]![0][1]!.thinking_blocks).toEqual([]);
+    expect(complete.mock.calls[0]![0].find(message => message.role === 'assistant')!.thinking_blocks).toEqual([]);
     state.appendEvent(user('C'));
     await new Agent({ llm: { profile: secondProfile, complete } }).step(state);
     expect(texts(complete.mock.calls[1]![0])).toEqual([

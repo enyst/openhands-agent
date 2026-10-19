@@ -10,6 +10,7 @@ import {
   type LLMConvertibleEvent,
 } from '../event/index.js';
 import { AGENT_OUTCOME } from '../event/error-classification.js';
+import { renderStaticSystemPrompt } from '../context/persona.js';
 import { View, type Condenser, type CondenserContext } from '../context/index.js';
 import { AgentResetCondenser } from '../context/agent-reset-condenser.js';
 import { contextWarningEvent } from '../context/context-warnings.js';
@@ -38,6 +39,7 @@ export interface AgentOptions {
   readonly condenser?: Condenser | null;
   readonly hardCondenser?: HardCondenser | null;
   readonly systemPrompt?: string | null;
+  readonly persona?: string | null;
   readonly usageId?: string;
 }
 
@@ -49,6 +51,7 @@ export class Agent {
   readonly condenser: Condenser | null;
   readonly hardCondenser: HardCondenser | null;
   readonly systemPrompt: string | null;
+  readonly persona: string | null;
   readonly usageId: string | undefined;
 
   constructor(options: AgentOptions) {
@@ -68,7 +71,23 @@ export class Agent {
     this.context = options.context ?? null;
     this.condenser = options.condenser ?? null;
     this.systemPrompt = options.systemPrompt ?? null;
+    this.persona = options.persona ?? null;
     this.usageId = options.usageId;
+  }
+
+  /**
+   * Copy runtime configuration without replacing a custom agent's prototype or
+   * instance members. Subclasses owning ECMAScript private slots must override
+   * this hook to construct their own copy; those slots cannot be reflected.
+   */
+  withOverrides(overrides: Partial<AgentOptions>): this {
+    const normalized = new Agent({ llm: this.llm, tools: this.tools, context: this.context,
+      condenser: this.condenser, hardCondenser: this.hardCondenser,
+      toolConcurrencyLimit: this.toolConcurrencyLimit, systemPrompt: this.systemPrompt, persona: this.persona,
+      ...(this.usageId === undefined ? {} : { usageId: this.usageId }), ...overrides });
+    const descriptors = Object.getOwnPropertyDescriptors(this);
+    Object.assign(descriptors, Object.getOwnPropertyDescriptors(normalized));
+    return Object.create(Object.getPrototypeOf(this) as object | null, descriptors) as this;
   }
 
   async step(state: ConversationState, options: { readonly callContext?: LLMCallContext | null } = {}): Promise<readonly Event[]> {
@@ -188,10 +207,15 @@ export class Agent {
     };
   }
 
+  get staticSystemMessage(): string {
+    return renderStaticSystemPrompt({ systemPrompt: this.systemPrompt, persona: this.persona, tools: this.tools, model: this.llm.profile.model });
+  }
+  get dynamicContext(): string | null { return this.context?.getSystemMessageSuffix() ?? null; }
+
   private renderSystemPrompt(): TextContent[] | null {
-    const suffix = this.context?.getSystemMessageSuffix() ?? null;
+    const suffix = this.dynamicContext;
     // Preserve the static/dynamic boundary for provider prompt caching.
-    const blocks = [this.systemPrompt, suffix].filter((text): text is string => text !== null).map(text => textContent(text));
+    const blocks = [this.staticSystemMessage, suffix].filter((text): text is string => text !== null).map(text => textContent(text));
     return blocks.length > 0 ? blocks : null;
   }
 

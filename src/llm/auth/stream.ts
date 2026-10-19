@@ -1,8 +1,9 @@
+import type { AttemptDeadline } from '../request-deadlines.js';
 import { providerResponseError } from '../exceptions.js';
 import type { FetchResponseLike } from '../client.js';
 
 /** Codex requires SSE even when callers want one completed SDK response. */
-export async function readSubscriptionResponse(response: FetchResponseLike, onTerminalResponse?: (response: unknown) => void): Promise<unknown> {
+export async function readSubscriptionResponse(response: FetchResponseLike, onTerminalResponse?: (response: unknown) => void, deadline?: AttemptDeadline): Promise<unknown> {
   const reader = response.body?.getReader();
   let pending = '';
   const outputItems: unknown[] = [];
@@ -38,8 +39,8 @@ export async function readSubscriptionResponse(response: FetchResponseLike, onTe
   };
   try {
     do {
-      const chunk = reader ? await reader.read() : { done: true, value: undefined };
-      pending += reader ? decode.decode(chunk.value, { stream: !chunk.done }) : await response.text();
+      const chunk = reader ? await (deadline ? deadline.next(() => reader.read()) : reader.read()) : { done: true, value: undefined };
+      pending += reader ? decode.decode(chunk.value, { stream: !chunk.done }) : await (deadline ? deadline.next(() => response.text()) : response.text());
       pending = pending.replace(/\r\n/gu, '\n');
       let end: number;
       while ((end = pending.indexOf('\n\n')) !== -1) {
@@ -56,6 +57,7 @@ export async function readSubscriptionResponse(response: FetchResponseLike, onTe
     } while (reader);
     throw new Error('OpenAI subscription stream ended without a completed response');
   } finally {
-    await reader?.cancel();
+    // Broken transports must not hold completion/error delivery hostage during cleanup.
+    if (reader) void Promise.resolve().then(() => reader.cancel()).catch(() => {});
   }
 }

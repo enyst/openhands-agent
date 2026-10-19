@@ -32,6 +32,9 @@ jobs:
       - name: Run drift-tool tests
         run: npm run test:drift
 
+      - name: Test pinned capability-generator proofs
+        run: npm run test:parity-generators
+
       - name: Type-check sources
         run: npm run typecheck
 

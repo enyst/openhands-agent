@@ -1,3 +1,5 @@
+import { globalToolRegistry, toolSpecSchema, type ToolSpec } from './index.js';
+
 /**
  * Canonical default tool names for the standard OpenHands agent.
  *
@@ -31,4 +33,76 @@ export function defaultToolSpecs(options: DefaultToolSpecOptions = {}): string[]
     names.push(SUB_AGENT_TOOL_NAME);
   }
   return names;
+}
+
+export const SWITCH_LLM_TOOL_NAME = 'switch_llm';
+export function resolveToolSpecs(tools: readonly ToolSpec[] | null | undefined, options: { readonly enableBrowser?: boolean } = {}): ToolSpec[] {
+  return (tools === null || tools === undefined) ? [...defaultToolSpecs(options), SWITCH_LLM_TOOL_NAME].map(name => ({ name, params: {} })) : [...tools];
+}
+export function launchToolSpecs(tools: readonly ToolSpec[] | null | undefined, options: { readonly browserAvailable: boolean }): ToolSpec[] {
+  return resolveToolSpecs(tools, { enableBrowser: options.browserAvailable }).filter(tool => options.browserAvailable || tool.name !== BROWSER_TOOL_NAME);
+}
+export function canonicalToolName(name: string): string { return globalToolRegistry.canonicalToolName(name); }
+export function mergeDuplicateTools(tools: readonly ToolSpec[]): ToolSpec[] {
+  const byName = new Map<string, ToolSpec>();
+  for (const tool of tools) {
+    const name = canonicalToolName(tool.name);
+    const kept = byName.get(name);
+    if (kept === undefined || (Object.keys(tool.params).length > 0 && Object.keys(kept.params).length === 0)) byName.set(name, { name, params: { ...tool.params } });
+  }
+  return [...byName.values()];
+}
+export function rejectBuiltinParams(tools: readonly ToolSpec[]): void {
+  for (const tool of tools) {
+    const builtin = globalToolRegistry.effectiveBuiltinName(tool.name);
+    if (builtin !== null && builtin !== 'route_task_to_model' && Object.keys(tool.params).some(key => key !== 'response_schema')) {
+      throw new Error(`Tool '${tool.name}' does not accept parameters`);
+    }
+  }
+}
+export function normalizeToolSpecs(tools: readonly unknown[]): ToolSpec[] {
+  return tools.map(tool => toolSpecSchema.parse(typeof tool === 'string' ? { name: tool } : tool));
+}
+export function foldRetiredToolSwitches(payload: Readonly<Record<string, unknown>>, options: { readonly sparse?: boolean; readonly enableBrowser?: boolean } = {}): Record<string, unknown> {
+  const folded = { ...payload };
+  const sparse = options.sparse ?? false;
+  const subAgents = popSwitch(folded, 'enable_sub_agents', sparse ? null : false);
+  let switchLlm = popSwitch(folded, 'enable_switch_llm_tool', sparse ? null : true);
+  let tools = folded.tools;
+  if (tools !== null && tools !== undefined && !Array.isArray(tools)) return folded;
+  if (!sparse && Array.isArray(tools) && tools.length === 0) tools = folded.tools = null;
+  if ((tools === null || tools === undefined) && !subAgents && switchLlm !== false) return folded;
+  let entries: ToolSpec[];
+  if (tools === null || tools === undefined) {
+    entries = defaultToolSpecs({ enableBrowser: options.enableBrowser ?? true, enableSubAgents: subAgents ?? false }).map(name => ({ name, params: {} }));
+    switchLlm ??= true;
+  } else {
+    entries = normalizeToolSpecs(tools as unknown[]);
+    if (sparse && subAgents !== null) entries = toggle(entries, SUB_AGENT_TOOL_NAME, subAgents);
+  }
+  if (switchLlm !== null) entries = toggle(entries, SWITCH_LLM_TOOL_NAME, switchLlm);
+  folded.tools = entries;
+  return folded;
+}
+export function foldDeprecatedToolSwitches(data: unknown): unknown {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return data;
+  const payload = data as Record<string, unknown>;
+  if (!('enable_sub_agents' in payload || 'enable_switch_llm_tool' in payload)) return data;
+  process.emitWarning('enable_sub_agents and enable_switch_llm_tool are deprecated; select task_tool_set and switch_llm in tools instead.', { type: 'DeprecationWarning', code: 'OPENHANDS_RETIRED_TOOL_SWITCHES' });
+  return foldRetiredToolSwitches(payload, { sparse: true });
+}
+function toggle(entries: ToolSpec[], name: string, enabled: boolean): ToolSpec[] {
+  if (!enabled) return entries.filter(entry => canonicalToolName(entry.name) !== name);
+  return entries.some(entry => canonicalToolName(entry.name) === name) ? entries : [...entries, { name, params: {} }];
+}
+function popSwitch(payload: Record<string, unknown>, key: string, fallback: boolean | null): boolean | null {
+  if (!(key in payload)) return fallback;
+  const value = payload[key]; delete payload[key];
+  if (typeof value === 'boolean') return value;
+  if (value === 0 || value === 1) return value === 1;
+  if (typeof value === 'string') {
+    if (['1', 'true', 't', 'yes', 'y', 'on'].includes(value.toLowerCase())) return true;
+    if (['0', 'false', 'f', 'no', 'n', 'off'].includes(value.toLowerCase())) return false;
+  }
+  throw new TypeError(`${key} must be a boolean.`);
 }

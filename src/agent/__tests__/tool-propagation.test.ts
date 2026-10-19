@@ -18,8 +18,8 @@ describe('Agent tool propagation', () => {
       async complete(messages) {
         if (++calls === 1) return { usage: null, message: messageSchema.parse({ role: 'assistant', content: [{ type: 'text', text: 'Sending both attachments.' }],
           tool_calls: ['image', 'voice'].map(value => ({ id: value, name: 'record_value', arguments: JSON.stringify({ value }), origin: 'completion' })) }) };
-        expect(messages.map(message => message.role)).toEqual(['assistant', 'tool', 'tool']);
-        expect(messages[0]?.tool_calls).toHaveLength(2);
+        expect(messages.map(message => message.role)).toEqual(['system', 'assistant', 'tool', 'tool']);
+        expect(messages[1]?.tool_calls).toHaveLength(2);
         return { usage: null, message: messageSchema.parse({ role: 'assistant', content: [{ type: 'text', text: 'done' }] }) };
       },
     };

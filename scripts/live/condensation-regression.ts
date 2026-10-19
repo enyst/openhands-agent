@@ -91,7 +91,9 @@ export async function runCondensationRegression(options: Options): Promise<Conde
     : new LLMSummarizingCondenser({ llm: summary, maxSize: options.scenario === 'size' ? 10 : 1000,
       maxTokens: options.scenario === 'tokens' ? 1100 : null, keepFirst: options.scenario === 'forced' ? 4 : 1 });
   const tools = [terminal, FinishTool.create()];
-  const agent = () => new Agent({ llm: main, tools, condenser });
+  // Keep non-condensable instructions below this scenario's deliberate 1,100-token
+  // budget; the source-derived default persona is larger than that entire window.
+  const agent = () => new Agent({ llm: main, tools, condenser, systemPrompt: 'Complete the requested public fixture task using the supplied tools.' });
   conversation = new LocalConversation({ agent: agent(), maxIterations: 15 });
 
   // c02: with one input event, keepFirst=4 makes only a full-view reset possible.

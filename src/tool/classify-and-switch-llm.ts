@@ -8,7 +8,9 @@ import { contentToString, messageSchema, textContent, textContentSchema, type LL
 import { createLlmUsageEvent } from '../llm/metrics.js';
 import { LLMUsagePersistenceError } from '../llm/usage-persistence.js';
 import { MetaProfileStore, metaProfileLlmsSchema, metaProfileSchema, type MetaProfile, type MetaProfileInput } from '../meta-profiles/index.js';
+import { classifyAndSwitchLLMParamsSchema } from './spec-validation.js';
 import { registerBuiltinResolver, ToolDefinition, toolAnnotationsSchema } from './index.js';
+import { NATIVE_TOOL_MODULE_QUALNAMES } from './module-qualnames.js';
 
 export const classifyAndSwitchLLMActionSchema = z.object({}).strict();
 export const classifyAndSwitchLLMObservationSchema = z.object({
@@ -58,7 +60,13 @@ export function parseClassIndex(text: string, numClasses: number): number {
 export function renderDirectPrompt(meta: MetaProfile, instanceText: string): string {
   const values: Record<string, string> = { instance_text: instanceText, model_table: meta.model_table ?? '' };
   const rendered = (meta.prompt_template ?? '').replace(/\{\{\s*(instance_text|model_table)\s*\}\}/gu, (_match, name: string) => values[name]!).trim();
-  return `${CLASSIFIER_SYSTEM_PREFIX}\n\n${rendered}`;
+  return rendered;
+}
+
+export function buildClassifierMessages(meta: MetaProfile, transcript: string): Message[] {
+  return meta.prompt_template === null
+    ? [message('system', buildClassifierPrompt(meta)), message('user', `Recent conversation:\n${transcript}\n\nCategory number:`)]
+    : [message('system', CLASSIFIER_SYSTEM_PREFIX), message('user', renderDirectPrompt(meta, transcript))];
 }
 
 export function parseDirectModel(text: string, availableModels: readonly string[]): string | null {
@@ -144,9 +152,7 @@ export class ClassifyAndSwitchLLMTool {
         } catch { return observation(`Failed to load classifier profile '${meta.classifier_model}'.`, true); }
 
         const transcript = recentMessagesText(runtime.state.events) || '(no messages yet)';
-        const messages: Message[] = meta.prompt_template === null
-          ? [message('system', buildClassifierPrompt(meta)), message('user', `Recent conversation:\n${transcript}\n\nCategory number:`)]
-          : [message('system', renderDirectPrompt(meta, transcript))];
+        const messages = buildClassifierMessages(meta, transcript);
         const callContext = runtime.getCallContext();
         const startedAt = Date.now();
         let response: LLMCompletionResponse | undefined;
@@ -217,14 +223,9 @@ function pythonScalarString(value: unknown): string {
   return typeof value === 'object' ? JSON.stringify(value) : '';
 }
 
-const resolverParamsSchema = z.object({
-  active_meta_profile: z.string().nullable().optional(),
-  meta_profile: metaProfileSchema.nullable().optional(),
-  meta_profile_llms: metaProfileLlmsSchema.optional(),
-}).strict();
 for (const name of ['route_task_to_model', ClassifyAndSwitchLLMTool.className]) {
   registerBuiltinResolver(name, (params, context) => {
-    const parsed = resolverParamsSchema.safeParse(params);
+    const parsed = classifyAndSwitchLLMParamsSchema.safeParse(params);
     if (!parsed.success) throw new Error('ClassifyAndSwitchLLMTool only accepts active_meta_profile, meta_profile, and native meta_profile_llms parameters.');
     const binding = typeof context === 'object' && context !== null ? context as ClassifyAndSwitchLLMToolOptions : {};
     return [ClassifyAndSwitchLLMTool.create({ ...binding,
@@ -232,5 +233,5 @@ for (const name of ['route_task_to_model', ClassifyAndSwitchLLMTool.className]) 
       ...(parsed.data.meta_profile === undefined ? {} : { metaProfile: parsed.data.meta_profile }),
       ...(parsed.data.meta_profile_llms === undefined ? {} : { metaProfileLlms: parsed.data.meta_profile_llms }),
     })];
-  });
+  }, { canonicalName: 'route_task_to_model', userSelectable: false, acceptsParams: true, moduleQualname: NATIVE_TOOL_MODULE_QUALNAMES.route_task_to_model });
 }

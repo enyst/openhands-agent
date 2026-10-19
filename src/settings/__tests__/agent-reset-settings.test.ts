@@ -24,7 +24,7 @@ const agentInput = { llm_profile_ref: 'main', condenser: agentReset };
 describe('agent-controlled condenser settings', () => {
   it('defaults advisory thresholds and preserves optional versus null fallback through JSON', () => {
     const absent = settings.validateAgentSettings(agentInput);
-    expect(absent).toMatchObject({ schema_version: 6, condenser: {
+    expect(absent).toMatchObject({ schema_version: settings.AGENT_SETTINGS_SCHEMA_VERSION, condenser: {
       condenser_kind: 'agent_reset', enabled: true, warning_thresholds: [0.75, 0.8, 0.85, 0.9],
     } });
     expect(absent).not.toHaveProperty('hard_condenser');
@@ -60,7 +60,7 @@ describe('agent-controlled condenser settings', () => {
 
   it('loads ordinary defaults unchanged without adding the optional new field', () => {
     const original = settings.defaultAgentSettings('main');
-    expect(original).toMatchObject({ schema_version: 6, condenser: {
+    expect(original).toMatchObject({ schema_version: settings.AGENT_SETTINGS_SCHEMA_VERSION, condenser: {
       condenser_kind: 'llm_summarizing', enabled: true, max_size: 1000, keep_first: 2,
     } });
     expect(original).not.toHaveProperty('hard_condenser');
@@ -74,11 +74,11 @@ describe('agent-controlled condenser settings', () => {
     },
   );
 
-  it('exposes the additive settings through the JSON schema without changing the version', () => {
+  it('exposes the additive settings through the JSON schema at the current version', () => {
     const schema = z.toJSONSchema(settings.openHandsAgentSettingsSchema);
     expect(schema.properties).toHaveProperty('hard_condenser');
     expect(schema.required).not.toContain('hard_condenser');
-    expect(settings.AGENT_SETTINGS_SCHEMA_VERSION).toBe(6);
+    expect(settings.AGENT_SETTINGS_SCHEMA_VERSION).toBe(8);
   });
 });
 

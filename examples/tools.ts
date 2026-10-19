@@ -17,7 +17,7 @@ try {
   console.log(await glob.execute({ pattern: '*.ts' }));
   console.log(await grep.execute({ pattern: 'hello', include: '*.ts' }));
   await tasks.execute({ command: 'plan', task_list: [{ title: 'Try concrete tools', status: 'done' }] });
-  console.log(await readFile(join(workspace, 'TASKS.md'), 'utf8'));
+  console.log(await readFile(join(workspace, 'TASKS.json'), 'utf8'));
 } finally {
   await rm(workspace, { recursive: true, force: true });
 }

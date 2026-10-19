@@ -15,6 +15,8 @@ import {
   llmProfileSchema,
 } from '../openai.js';
 
+const emptyMetadata = async () => ({ ok: true, status: 200, json: async () => ({ data: [] }), text: async () => '' });
+
 describe('profile-resolved OpenAI-compatible chat client', () => {
   it('forwards Kimi K2.5 reasoning effort through OpenRouter chat completions', async () => {
     const profile = llmProfileSchema.parse({
@@ -27,6 +29,7 @@ describe('profile-resolved OpenAI-compatible chat client', () => {
     const store = new InMemorySecretStore([[llmProviderSecretRef('openrouter'), 'test-key']]);
     const calls: FakeFetchCall[] = [];
     const client = await createOpenAIChatClientFromProfile(profile, store, {
+      metadataFetch: emptyMetadata,
       fetch: fakeFetch({ content: 'ok' }, calls),
     });
 
@@ -48,7 +51,7 @@ describe('profile-resolved OpenAI-compatible chat client', () => {
     });
     const store = new InMemorySecretStore([[llmProviderSecretRef('litellm_proxy'), 'proxy-key']]);
 
-    const client = await createOpenAIChatClientFromProfile(profile, store, { fetch: fakeFetch({ content: 'ok' }) });
+    const client = await createOpenAIChatClientFromProfile(profile, store, { metadataFetch: emptyMetadata, fetch: fakeFetch({ content: 'ok' }) });
 
     expect(client).toBeInstanceOf(OpenAIChatClient);
     expect(client.profile.providerId).toBe('litellm_proxy');
@@ -67,7 +70,7 @@ describe('profile-resolved OpenAI-compatible chat client', () => {
       [llmProfileSecretRef('eval-proxy'), 'profile-key'],
     ]);
     const calls: FakeFetchCall[] = [];
-    const client = await createOpenAIChatClientFromProfile(profile, store, { fetch: fakeFetch({ content: 'ok' }, calls) });
+    const client = await createOpenAIChatClientFromProfile(profile, store, { metadataFetch: emptyMetadata, fetch: fakeFetch({ content: 'ok' }, calls) });
 
     await client.complete([{ role: 'user', content: [textContent('hello')] }]);
 
@@ -85,7 +88,7 @@ describe('profile-resolved OpenAI-compatible chat client', () => {
     });
     const store = new InMemorySecretStore([[llmProviderSecretRef('openai'), 'openai-key']]);
     const calls: FakeFetchCall[] = [];
-    const client = await createOpenAIChatClientFromProfile(profile, store, { fetch: fakeFetch({ content: 'pong' }, calls) });
+    const client = await createOpenAIChatClientFromProfile(profile, store, { metadataFetch: emptyMetadata, fetch: fakeFetch({ content: 'pong' }, calls) });
 
     const result = await client.complete([
       { role: 'system', content: [textContent('You are terse.')] },
@@ -206,6 +209,7 @@ describe('profile-resolved OpenAI-compatible chat client', () => {
     const store = new InMemorySecretStore([[llmProviderSecretRef('openai'), 'openai-key']]);
     const calls: FakeFetchCall[] = [];
     const client = await createOpenAIResponsesClientFromProfile(profile, store, {
+      metadataFetch: emptyMetadata,
       fetch: fakeResponsesFetch({ content: 'response pong' }, calls),
     });
 
@@ -343,7 +347,7 @@ describe('OpenAI-compatible native tool routes', () => {
     const profile = llmProfileSchema.parse(rawProfile);
     const calls: FakeFetchCall[] = [];
     const store = new InMemorySecretStore([[llmProviderSecretRef(profile.providerId), 'proxy-key']]);
-    const client = await createOpenAIChatClientFromProfile(profile, store, { fetch: fakeFetch({ content: 'ok' }, calls) });
+    const client = await createOpenAIChatClientFromProfile(profile, store, { metadataFetch: emptyMetadata, fetch: fakeFetch({ content: 'ok' }, calls) });
 
     await client.complete([{ role: 'user', content: [textContent('Look it up.')] }], [tool]);
 
@@ -561,6 +565,7 @@ describe('OpenAI chat message serialization parity', () => {
     });
     const store = new InMemorySecretStore([[llmProviderSecretRef('deepseek'), 'deepseek-key']]);
     const client = await createOpenAIChatClientFromProfile(profile, store, {
+      metadataFetch: emptyMetadata,
       fetch: fakeReasoningFetch({ content: 'done', reasoning: 'the model thought' }),
     });
 
@@ -579,6 +584,7 @@ describe('OpenAI chat message serialization parity', () => {
     const store = new InMemorySecretStore([[llmProviderSecretRef('deepseek'), 'deepseek-key']]);
     const calls: FakeFetchCall[] = [];
     const client = await createOpenAIChatClientFromProfile(profile, store, {
+      metadataFetch: emptyMetadata,
       fetch: fakeReasoningFetch({ content: 'done', reasoning: 'chain of thought' }, calls),
     });
 

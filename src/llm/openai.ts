@@ -1,3 +1,4 @@
+import { withAttemptDeadline } from './request-deadlines.js';
 import { LLMContextBudget, type MetadataFetchLike } from './context-budget.js';
 import type { LLMCompletionOptions, LLMTokenCountTool } from './client.js';
 import { applyLLMCallContextHeaders, getLLMCallContext, type LLMCallContext } from './call-context.js';
@@ -21,7 +22,7 @@ import {
   type Message,
   type MessageToolCall,
 } from './index.js';
-import { isAnthropicModel, isReasoningModel, normalizeGenerationParamsForModel, resolveOpenAIPromptCacheKey, resolveOpenAIPromptCacheRetention } from './provider-quirks.js';
+import { isAnthropicModel, isReasoningModel, normalizeGenerationParamsForModel, resolveOpenAIPromptCacheKey, resolveOpenAIPromptCacheRetention, type PromptCacheMetadata } from './provider-quirks.js';
 import { ANTHROPIC_CACHE_CONTROL, prepareAnthropicPromptCaching, finalizeAnthropicCacheBreakpoints } from './anthropic-prompt-cache.js';
 
 export { llmCompletionResponseSchema, llmUsageSchema } from './client.js';
@@ -58,23 +59,25 @@ export class OpenAIChatClient implements LLMClient {
 
   async complete(messages: readonly Message[], tools?: readonly ToolDefinition[], options?: LLMCompletionOptions): Promise<LLMCompletionResponse> {
     const context = getLLMCallContext(options?.callContext);
-    const body = buildChatCompletionsBody(this.profile, messages, tools, context);
+    await this.contextBudget.resolvePromptCacheMetadata();
+    const body = buildChatCompletionsBody(this.profile, messages, tools, context, this.contextBudget.promptCacheMetadata);
     const serializedBody = JSON.stringify(body);
-    const response = await requestWithRecovery(this.apiKey, this.requestOptions, async (key, refreshed) => {
+    const raw = await requestWithRecovery(this.apiKey, this.requestOptions, (key, refreshed) => withAttemptDeadline(this.profile, async deadline => {
       const headers = buildHeaders(this.profile, key);
       const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/chat/completions`, {
         method: 'POST',
         headers: applyLLMCallContextHeaders(refreshed ? replaceCredentialHeader(headers, 'authorization', `Bearer ${key}`) : headers, context),
         body: serializedBody,
+        signal: deadline.signal,
       }).catch(error => { throw mapProviderException(error); });
       if (!response.ok) {
-        const text = await response.text();
+        const text = await deadline.collect(() => response.text());
         throwProviderErrorWithMetadata(text, providerResponseError('OpenAI-compatible', response.status, text), raw => parseChatCompletionsMetadata(raw, this.profile));
       }
-      return response;
-    }, this.profile.authType === 'api_key');
+      return deadline.collect(() => response.json());
+    }), this.profile.authType === 'api_key');
 
-    return parseChatCompletionsResponse(await response.json(), this.profile);
+    return parseChatCompletionsResponse(raw, this.profile);
   }
 }
 
@@ -110,32 +113,32 @@ export class OpenAIResponsesClient implements LLMClient {
       Object.assign(headers, { originator: 'codex_cli_rs', 'OpenAI-Beta': 'responses=experimental', 'User-Agent': `openhands-sdk (${platform()}; ${arch()})` });
       if (accountId) headers['chatgpt-account-id'] = accountId;
     }
-    const serializedBody = JSON.stringify(buildOpenAIResponsesBody(this.profile, messages, tools, context));
-    const response = await requestWithRecovery(apiKey, this.requestOptions, async (key, refreshed) => {
+    await this.contextBudget.resolvePromptCacheMetadata();
+    const serializedBody = JSON.stringify(buildOpenAIResponsesBody(this.profile, messages, tools, context, this.contextBudget.promptCacheMetadata));
+    const raw = await requestWithRecovery(apiKey, this.requestOptions, (key, refreshed) => withAttemptDeadline(this.profile, async deadline => {
       const requestHeaders = buildHeaders({ ...this.profile, headers }, key);
       const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/responses`, {
         method: 'POST',
         headers: applyLLMCallContextHeaders(refreshed ? replaceCredentialHeader(requestHeaders, 'authorization', `Bearer ${key}`) : requestHeaders, context),
         body: serializedBody,
+        signal: deadline.signal,
       }).catch(error => { throw mapProviderException(error); });
       if (!response.ok) {
-        const text = await response.text();
+        const text = await deadline.collect(() => response.text());
         throwProviderErrorWithMetadata(text, providerResponseError(this.subscriptionAuth ? 'OpenAI subscription' : 'OpenAI Responses', response.status, text), parseOpenAIResponsesMetadata);
       }
-      return response;
-    }, !this.subscriptionAuth && this.profile.authType === 'api_key');
-    let raw: unknown;
-    let terminalResponse: unknown;
-    try {
-      raw = this.subscriptionAuth
-        ? await readSubscriptionResponse(response, received => { terminalResponse = received; })
-        : await response.json();
-    } catch (error) {
-      if (terminalResponse !== undefined) {
-        throwProviderErrorWithMetadata(terminalResponse, error, parseOpenAIResponsesMetadata);
-      }
-      throw error;
-    }
+      return deadline.collect(async () => {
+        let terminalResponse: unknown;
+        try {
+          return this.subscriptionAuth
+            ? await readSubscriptionResponse(response, received => { terminalResponse = received; }, deadline)
+            : await response.json();
+        } catch (error) {
+          if (terminalResponse !== undefined) throwProviderErrorWithMetadata(terminalResponse, error, parseOpenAIResponsesMetadata);
+          throw error;
+        }
+      });
+    }), !this.subscriptionAuth && this.profile.authType === 'api_key');
     return parseOpenAIResponsesResponse(raw);
   }
 }
@@ -191,13 +194,13 @@ export async function createOpenAIResponsesClientFromProfile(
   return new OpenAIResponsesClient(profile, apiKey, options.fetch ?? defaultFetch, undefined, options.metadataFetch, options);
 }
 
-function applyOpenAIPromptCacheOptions(body: Record<string, unknown>, profile: LLMProfile, context?: LLMCallContext): void {
+function applyOpenAIPromptCacheOptions(body: Record<string, unknown>, profile: LLMProfile, context?: LLMCallContext, metadata?: PromptCacheMetadata): void {
   const retention = resolveOpenAIPromptCacheRetention(profile);
   if (retention !== undefined) {
     body.prompt_cache_retention = retention;
   }
 
-  const cacheKey = resolveOpenAIPromptCacheKey(profile, context?.promptCacheKey);
+  const cacheKey = resolveOpenAIPromptCacheKey(profile, context?.promptCacheKey, metadata);
   if (cacheKey !== undefined) {
     body.prompt_cache_key = cacheKey;
   }
@@ -208,6 +211,7 @@ export function buildChatCompletionsBody(
   messages: readonly Message[],
   tools: readonly ToolDefinition[] = [],
   context?: LLMCallContext,
+  metadata?: PromptCacheMetadata,
 ): Record<string, unknown> {
   const normalizedProfile = normalizeGenerationParamsForModel(profile);
   const sendReasoningContent = isReasoningModel(normalizedProfile);
@@ -233,13 +237,10 @@ export function buildChatCompletionsBody(
   if (normalizedProfile.maxOutputTokens !== null) {
     body.max_completion_tokens = normalizedProfile.maxOutputTokens;
   }
-  if (normalizedProfile.timeoutSeconds !== null) {
-    body.timeout = normalizedProfile.timeoutSeconds;
-  }
   if (normalizedProfile.reasoningEffort !== null) {
     body.reasoning_effort = normalizedProfile.reasoningEffort;
   }
-  applyOpenAIPromptCacheOptions(body, normalizedProfile, context);
+  applyOpenAIPromptCacheOptions(body, normalizedProfile, context, metadata);
   if (normalizedProfile.verbosity !== undefined) body.verbosity = normalizedProfile.verbosity;
   finalizeAnthropicCacheBreakpoints(normalizedProfile, body);
   return body;
@@ -250,6 +251,7 @@ export function buildOpenAIResponsesBody(
   messages: readonly Message[],
   tools: readonly ToolDefinition[] = [],
   context?: LLMCallContext,
+  metadata?: PromptCacheMetadata,
 ): Record<string, unknown> {
   const normalizedProfile = normalizeGenerationParamsForModel(profile);
   const parsedMessages = orderCompletedToolResults(messages.map((message) => messageSchema.parse(message)));
@@ -292,7 +294,7 @@ export function buildOpenAIResponsesBody(
     delete body.include;
     // Subscription Responses accepts explicit effort/summary; retain the selected profile options.
   }
-  applyOpenAIPromptCacheOptions(body, normalizedProfile, context);
+  applyOpenAIPromptCacheOptions(body, normalizedProfile, context, metadata);
   return body;
 }
 

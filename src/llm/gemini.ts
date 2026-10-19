@@ -1,3 +1,4 @@
+import { withAttemptDeadline } from './request-deadlines.js';
 import { LLMContextBudget, type MetadataFetchLike } from './context-budget.js';
 import type { LLMCompletionOptions, LLMTokenCountTool } from './client.js';
 import { applyLLMCallContextHeaders, getLLMCallContext } from './call-context.js';
@@ -43,21 +44,22 @@ export class GeminiClient implements LLMClient {
   async complete(messages: readonly Message[], tools?: readonly ToolDefinition[], options?: LLMCompletionOptions): Promise<LLMCompletionResponse> {
     const context = getLLMCallContext(options?.callContext);
     const serializedBody = JSON.stringify(buildGeminiInteractionsBody(this.profile, messages, tools));
-    const response = await requestWithRecovery(this.apiKey, this.requestOptions, async (key, refreshed) => {
+    const raw = await requestWithRecovery(this.apiKey, this.requestOptions, (key, refreshed) => withAttemptDeadline(this.profile, async deadline => {
       const headers = buildHeaders(this.profile, key);
       const response = await this.fetchImpl(`${resolveBaseUrl(this.profile)}/interactions`, {
         method: 'POST',
         headers: applyLLMCallContextHeaders(refreshed ? replaceCredentialHeader(headers, 'x-goog-api-key', key) : headers, context),
         body: serializedBody,
+        signal: deadline.signal,
       }).catch(error => { throw mapProviderException(error); });
       if (!response.ok) {
-        const text = await response.text();
+        const text = await deadline.collect(() => response.text());
         throwProviderErrorWithMetadata(text, providerResponseError('Gemini Interactions', response.status, text), parseGeminiMetadata);
       }
-      return response;
-    }, this.profile.authType === 'api_key');
+      return deadline.collect(() => response.json());
+    }), this.profile.authType === 'api_key');
 
-    return parseGeminiInteractionResponse(await response.json());
+    return parseGeminiInteractionResponse(raw);
   }
 }
 

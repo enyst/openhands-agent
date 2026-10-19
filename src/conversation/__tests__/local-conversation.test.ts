@@ -2,13 +2,29 @@ import { describe, expect, it } from 'vitest';
 
 import { Agent } from '../../agent/index.js';
 import { messageEventSchema, type Event } from '../../event/index.js';
-import type { LLMClient, LLMCompletionResponse } from '../../llm/client.js';
+import { LLMResponseError, type LLMClient, type LLMCompletionResponse } from '../../llm/client.js';
+import { LLMTimeoutError } from '../../llm/exceptions.js';
 import { textContent, type LLMProfile, type Message } from '../../llm/index.js';
 import { FinishTool, ThinkTool } from '../../tool/builtins.js';
 import { conversationExecutionStatus } from '../state.js';
 import { LocalConversation } from '../local-conversation.js';
 
 describe('LocalConversation', () => {
+  it.each([false, true])('sets ERROR and preserves accounting exactly once for a timeout (wrapped=%s)', async (wrapped) => {
+    const timeout = new LLMTimeoutError('idle');
+    const failure = wrapped ? new LLMResponseError({ usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 } }, timeout) : timeout;
+    const llm: LLMClient = { profile: new FakeLLM([]).profile, complete: async () => { throw failure; } };
+    const conversation = new LocalConversation({ agent: new Agent({ llm, tools: [] }) });
+    conversation.sendMessage('timeout');
+    await expect(conversation.run()).rejects.toBe(failure);
+    expect(conversation.state.executionStatus).toBe(conversationExecutionStatus.ERROR);
+    const errors = conversation.state.events.filter(event => event.kind === 'ConversationErrorEvent');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ code: 'LLMTimeoutError', detail: 'The LLM completion exceeded its configured deadline.' });
+    const usages = conversation.state.events.filter(event => event.kind === 'ConversationStateUpdateEvent' && event.key === 'llm_usage');
+    expect(usages).toHaveLength(wrapped ? 1 : 0);
+  });
+
   it('runs agent steps until finish tool marks the conversation finished', async () => {
     const llm = new FakeLLM([
       {
@@ -25,7 +41,7 @@ describe('LocalConversation', () => {
     expect(conversation.state.executionStatus).toBe(conversationExecutionStatus.FINISHED);
     expect(conversation.state.events.map((event) => event.kind)).toEqual(['MessageEvent', 'ConversationStateUpdateEvent', 'ConversationStateUpdateEvent', 'ActionEvent', 'ObservationEvent']);
     expect(conversation.state.events[4]).toMatchObject({ kind: 'ObservationEvent', tool_name: 'finish', observation: { text: 'done' } });
-    expect(llm.requests[0]?.map((message) => message.role)).toEqual(['user']);
+    expect(llm.requests[0]?.map((message) => message.role)).toEqual(['system', 'user']);
   });
 
   it('finishes the turn as soon as the model replies with visible content', async () => {

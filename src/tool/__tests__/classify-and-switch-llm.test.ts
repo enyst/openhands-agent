@@ -17,7 +17,7 @@ import { openHandsAgentSettingsSchema } from '../../settings/index.js';
 import { resolveTool } from '../index.js';
 import { FinishTool } from '../builtins.js';
 import {
-  ClassifyAndSwitchLLMTool, buildClassifierPrompt, parseClassIndex, parseDirectModel,
+  ClassifyAndSwitchLLMTool, buildClassifierMessages, buildClassifierPrompt, parseClassIndex, parseDirectModel,
   recentMessagesText, renderDirectPrompt, type MetaProfileRoutingRuntime,
 } from '../classify-and-switch-llm.js';
 
@@ -58,7 +58,7 @@ test('prompts preserve category order and substitute templates once', () => {
   expect(buildClassifierPrompt(meta)).toContain('1. UI / images\n2. tests');
   expect(buildClassifierPrompt(meta)).toContain('respond with 0');
   const direct = metaProfileSchema.parse({ classifier_model: 'classifier', prompt_template: '{{ model_table }}\n{{ instance_text }}', model_table: 'models' });
-  expect(renderDirectPrompt(direct, '{{ model_table }}')).toBe('You are a model-routing classifier.\n\nmodels\n{{ model_table }}');
+  expect(renderDirectPrompt(direct, '{{ model_table }}')).toBe('models\n{{ model_table }}');
 });
 test('classifier transcript uses only last six nonempty MessageEvents', () => {
   const state = new ConversationState();
@@ -155,7 +155,7 @@ test('inline native profiles route with no saved profile database', async () => 
   expect(result).toMatchObject({ is_error: false, model: 'Careful', chosen_class: 'model: Careful' });
   expect(f.resolveClient).toHaveBeenCalledWith('classifier', inline.classifier);
   expect(f.switchProfile).toHaveBeenCalledWith('Careful', inline.Careful);
-  expect(f.complete.mock.calls[0]?.[0]).toHaveLength(1);
+  expect(f.complete.mock.calls[0]?.[0]).toHaveLength(2);
 });
 test('missing runtime/classifier/target produce errors and rejected client construction can retry', async () => {
   const f = fixture();
@@ -258,4 +258,31 @@ test.each(['create', 'append'] as const)('a real conversation stops after classi
   expect(f.switchProfile).not.toHaveBeenCalled();
   expect(f.state.events.some(event => event.kind === 'AgentErrorEvent')).toBe(false);
   expect(JSON.stringify(f.state.events)).not.toContain('private storage detail');
+});
+
+// PORT 53a4bc50: direct classifiers must provide a user turn, including empty histories.
+test('classifier builders keep system instructions separate from user transcript', () => {
+  const direct = metaProfileSchema.parse({ classifier_model: 'classifier', prompt_template: '{{ instance_text }}\n{{ model_table }}', model_table: 'careful' });
+  const messages = buildClassifierMessages(direct, '{{ model_table }}');
+  expect(messages.map(item => item.role)).toEqual(['system', 'user']);
+  expect(messages[0]?.content).toEqual([textContent('You are a model-routing classifier.')]);
+  expect(messages[1]?.content).toEqual([textContent('{{ model_table }}\ncareful')]);
+  const classes = buildClassifierMessages(meta, 'user: tests');
+  expect(classes.map(item => item.role)).toEqual(['system', 'user']);
+  expect(classes[0]?.content).toEqual([textContent(buildClassifierPrompt(meta))]);
+  expect(classes[1]?.content).toEqual([textContent('Recent conversation:\nuser: tests\n\nCategory number:')]);
+});
+test('direct classifier works with a provider requiring a nonempty user turn and accounts once', async () => {
+  const f = fixture();
+  const complete = vi.fn<LLMClient['complete']>(async messages => {
+    if (!messages.some(item => item.role === 'user' && item.content.some(content => content.type === 'text' && content.text))) throw new Error('user required');
+    expect(messages[1]?.content).toEqual([textContent('(no messages yet)')]);
+    return llmCompletionResponseSchema.parse({ message: { role: 'assistant', content: [textContent('{"model":"careful"}')] }, usage: { totalTokens: 4 } });
+  });
+  f.client.complete = complete;
+  const direct = { classifier_model: 'classifier', prompt_template: '{{ instance_text }}' };
+  expect(await ClassifyAndSwitchLLMTool.create({ metaProfile: direct, metaProfileStore: f.store, runtime: f.runtime }).execute({})).toMatchObject({ is_error: false, model: 'careful' });
+  expect(complete).toHaveBeenCalledTimes(1);
+  expect(f.state.stats.usage_to_metrics['classifier:classifier']?.records).toHaveLength(1);
+  expect(f.switchProfile).toHaveBeenCalledTimes(1);
 });

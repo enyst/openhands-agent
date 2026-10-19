@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { foldDeprecatedToolSwitches, foldRetiredToolSwitches } from '../tool/defaults.js';
+import { persistedToolSpecsSchema } from '../tool/spec-validation.js';
 
 import { condenserSettingsSchema, hardCondenserSettingsSchema } from './condenser-settings.js';
 import { metaProfileLlmsSchema, metaProfileSchema } from '../meta-profiles/index.js';
@@ -38,7 +40,7 @@ export type ProfileSelectedLlmSettings = {
   readonly [K in RawLlmFieldIgnoredWhenProfileSelected]?: unknown;
 };
 
-export const AGENT_SETTINGS_SCHEMA_VERSION = 6;
+export const AGENT_SETTINGS_SCHEMA_VERSION = 8;
 export const CONVERSATION_SETTINGS_SCHEMA_VERSION = 1;
 
 const settingsSchemaVersion = (version: number) => z.literal(version).default(version);
@@ -72,15 +74,14 @@ const agentSettingsBaseFields = {
 
 const defaultVerificationSettings: ProfileVerificationSettings = profileVerificationSettingsSchema.parse({});
 
-export const openHandsAgentSettingsSchema = z
+const openHandsAgentSettingsObjectSchema = z
   .object({
     ...agentSettingsBaseFields,
     agent_kind: z.literal('openhands').default('openhands'),
     llm_profile_ref: z.string().min(1),
     agent: z.string().default('CodeActAgent'),
-    tools: z.array(z.unknown()).nullable().default(null),
-    enable_sub_agents: z.boolean().default(false),
-    enable_switch_llm_tool: z.boolean().default(true),
+    tools: persistedToolSpecsSchema.nullable().default(null),
+    persona: z.string().min(1).max(65536).nullable().default(null),
     enable_classify_and_switch_llm_tool: z.boolean().default(false),
     active_meta_profile: z.string().nullable().default(null),
     meta_profile: metaProfileSchema.nullable().default(null),
@@ -102,7 +103,9 @@ export const openHandsAgentSettingsSchema = z
     }
   });
 
-export const acpAgentSettingsSchema = z
+export const openHandsAgentSettingsSchema = z.preprocess(foldDeprecatedToolSwitches, openHandsAgentSettingsObjectSchema);
+
+const acpAgentSettingsObjectSchema = z
   .object({
     ...agentSettingsBaseFields,
     agent_kind: z.literal('acp').default('acp'),
@@ -115,6 +118,16 @@ export const acpAgentSettingsSchema = z
     acp_startup_timeout: z.number().positive().default(90),
   })
   .strict();
+
+export const acpAgentSettingsSchema = z.preprocess(data => {
+  if (!isRecord(data)) return data;
+  const payload = { ...data };
+  if ('llm' in payload) process.emitWarning('ACPAgentSettings.llm is deprecated and ignored; ACP manages its own LLM.', { type: 'DeprecationWarning', code: 'OPENHANDS_ACP_LLM_IGNORED' });
+  delete payload.llm;
+  delete payload.enable_sub_agents;
+  delete payload.enable_switch_llm_tool;
+  return payload;
+}, acpAgentSettingsObjectSchema);
 
 export const agentSettingsSchema = z.union([openHandsAgentSettingsSchema, acpAgentSettingsSchema]);
 
@@ -150,8 +163,13 @@ export function clearRawLlmFieldsWhenProfileSelected<T extends ProfileSelectedLl
   };
 }
 
-export function validateAgentSettings(data: unknown): AgentSettings {
-  const payload = applySettingsVersion(data, AGENT_SETTINGS_SCHEMA_VERSION, 'AgentSettings');
+export function validateAgentSettings(data: unknown, options: { readonly persisted?: boolean } = {}): AgentSettings {
+  let payload = applySettingsVersion(data, AGENT_SETTINGS_SCHEMA_VERSION, 'AgentSettings');
+  const originalVersion = isRecord(data) ? data.schema_version : undefined;
+  const legacy = typeof originalVersion === 'number' ? originalVersion < 8 : options.persisted === true;
+  if (legacy && (payload.agent_kind ?? 'openhands') !== 'acp') payload = foldRetiredToolSwitches(payload);
+  const legacyAcpLlm = typeof originalVersion === 'number' ? originalVersion < 7 : options.persisted === true;
+  if (payload.agent_kind === 'acp' && legacyAcpLlm) delete payload.llm;
   const kind = payload.agent_kind ?? 'openhands';
   if (kind === 'acp') {
     return acpAgentSettingsSchema.parse(payload);

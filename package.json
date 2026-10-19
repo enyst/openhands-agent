@@ -47,9 +47,11 @@
     "live:regressions": "npm run build && tsx scripts/live/run.ts --all",
     "live:list": "tsx scripts/live/run.ts --list",
     "test:live-harness": "node --import tsx --test scripts/live/*.node-test.ts",
-    "live:subscriptions": "npm run build && node --import tsx scripts/live/subscriptions-run.ts"
+    "live:subscriptions": "npm run build && node --import tsx scripts/live/subscriptions-run.ts",
+    "test:parity-generators": "python3 -B scripts/parity/test_prompt_cache_generator.py"
   },
   "dependencies": {
+    "chardet": "2.2.0",
     "js-tiktoken": "^1.0.21",
     "zod": "^4.4.3"
   },
