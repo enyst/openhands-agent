@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, readFile, stat } from 'node:fs/promises';
+import { access, lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve, sep, posix } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -306,6 +306,40 @@ export async function getChangesInRepo(repoDir: string, ref?: string | null): Pr
     changes.push({ status: GitChangeStatus.ADDED, path: toPosixPath(path.trim()) });
   }
   return changes.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/** Collect workspace changes and those in immediate non-hidden child repositories. */
+export async function getGitChanges(cwd: string, ref?: string | null): Promise<GitChange[]> {
+  // Python glob('./*/.git') also accepts worktree files and symlinked directories.
+  const entries = await readdir(cwd).catch((): string[] => []);
+  const nested = (await Promise.all(entries.filter(name => !name.startsWith('.')).map(async name =>
+    await lstat(join(cwd, name, '.git')).then(() => name, () => null),
+  ))).filter((name): name is string => name !== null);
+
+  let changes: GitChange[];
+  let baseError: GitRepositoryError | null = null;
+  try {
+    changes = await getChangesInRepo(cwd, ref);
+  } catch (error) {
+    if (!(error instanceof GitRepositoryError) || nested.length === 0) throw error;
+    baseError = error;
+    changes = [];
+  }
+  changes = changes.filter(change => !nested.some(name => change.path === name || change.path.startsWith(`${name}/`)));
+
+  let foundNestedRepository = false;
+  for (const name of nested) {
+    try {
+      const childChanges = await getChangesInRepo(join(cwd, name), ref);
+      foundNestedRepository = true; // A clean child is still a valid repository.
+      changes.push(...childChanges.map(change => ({ ...change, path: posix.join(name, change.path) })));
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+    }
+  }
+  if (baseError !== null && !foundNestedRepository) throw baseError;
+  // UTF-8 byte ordering preserves Unicode code-point ordering, unlike host collation.
+  return changes.sort((left, right) => Buffer.compare(Buffer.from(left.path), Buffer.from(right.path)));
 }
 
 export async function getClosestGitRepo(path: string): Promise<string | null> {

@@ -7,6 +7,37 @@ import { condenserSettingsSchema, hardCondenserSettingsSchema } from '../setting
 
 export const AGENT_PROFILE_SCHEMA_VERSION = 3;
 
+// Pydantic's summary integer accepts booleans and decimal integer strings, but
+// not Number()'s hex/exponent/empty-string coercions. Keep stored profiles strict.
+const summaryRevisionSchema = z.preprocess(value => {
+  if (typeof value === 'boolean') return Number(value);
+  if (typeof value === 'string') {
+    const normalized = value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
+    if (/^[+-]?[0-9](?:_?[0-9])*(?:\.0+)?$/u.test(normalized)) {
+      value = Number(normalized.replaceAll('_', ''));
+    }
+  }
+  return Object.is(value, -0) ? 0 : value;
+}, z.number().int()).nullable().default(null);
+
+/** Stored-profile summary; parsing does not resolve references or instantiate an agent. */
+export const agentProfileInfoSchema = z.object({
+  id: z.string().nullable().default(null),
+  name: z.string(),
+  agent_kind: z.string().default('openhands'),
+  revision: summaryRevisionSchema,
+  llm_profile_ref: z.string().nullable().default(null),
+  mcp_server_refs: z.array(z.string()).nullable().default(null),
+});
+
+export const agentProfileListResponseSchema = z.object({
+  profiles: z.array(agentProfileInfoSchema),
+  active_agent_profile_id: z.string().nullable().default(null),
+});
+
+export type AgentProfileInfo = z.infer<typeof agentProfileInfoSchema>;
+export type AgentProfileListResponse = z.infer<typeof agentProfileListResponseSchema>;
+
 export const acpServerKindSchema = z.union([
   z.literal('claude-code'),
   z.literal('codex'),
