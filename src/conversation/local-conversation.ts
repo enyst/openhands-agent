@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { condensationRequestSchema, conversationErrorEventSchema, messageEventSchema, type Event } from '../event/index.js';
 import { LocalFileStore, type FileStore } from '../io/index.js';
 import { textContent } from '../llm/index.js';
+import { getLLMCallContext, withLLMCallContext, type LLMCallContext } from '../llm/call-context.js';
+import { isLLMAuthenticationError } from '../llm/exceptions.js';
+import { LLMUsagePersistenceError } from '../llm/usage-persistence.js';
 import type { Agent } from '../agent/index.js';
 import { AgentResetCondenser, AgentControlledCondensationError } from '../context/agent-reset-condenser.js';
 import { EventLog, EVENTS_DIR } from './event-log.js';
@@ -16,6 +19,8 @@ export interface LocalConversationOptions {
   readonly maxIterations?: number;
   readonly stuckDetection?: boolean | StuckDetectionThresholds;
   readonly conversationId?: string;
+  /** Optional cache shard shared with a parent; session identity always remains local. */
+  readonly promptCacheKey?: string | null;
   readonly conversationsDir?: string;
   readonly fileStore?: FileStore;
   /** Runs before the first step and after each fully persisted step, including finish. */
@@ -35,16 +40,20 @@ export class LocalConversation {
   readonly state: ConversationState;
   readonly maxIterations: number;
   readonly stuckDetector: StuckDetector | null;
-  readonly conversationId: string | null;
+  readonly conversationId: string;
+  private readonly callContext: LLMCallContext;
 
   constructor(options: LocalConversationOptions) {
     this.activeAgent = options.agent;
     this.onStepBoundary = options.onStepBoundary;
-    this.conversationId = options.conversationId ?? (options.state === undefined && hasPersistentStore(options) ? randomUUID() : null);
-    this.state = options.state ?? createConversationState(options, this.conversationId);
+    this.conversationId = options.conversationId ?? randomUUID();
+    this.callContext = getLLMCallContext().forConversation(this.conversationId, options.promptCacheKey === undefined ? {} : { promptCacheKey: options.promptCacheKey });
+    this.state = options.state ?? createConversationState(options, hasPersistentStore(options) ? this.conversationId : null);
     this.maxIterations = options.maxIterations ?? 500;
     this.stuckDetector = createStuckDetector(this.state, options.stuckDetection);
   }
+
+  getLLMCallContext(): LLMCallContext { return this.callContext; }
 
   sendMessage(text: string): Event {
     const event = this.createUserMessageEvent(text);
@@ -72,10 +81,22 @@ export class LocalConversation {
 
   async run(): Promise<void> {
     if (this.runInProgress !== null) return this.runInProgress;
-    const run = this.runOnce();
+    const run = withLLMCallContext(this.callContext, () => this.runOnce());
     this.runInProgress = run;
     try {
       await run;
+    } catch (error) {
+      if (error instanceof LLMUsagePersistenceError) {
+        // Persistence just failed: change runtime status without another write.
+        this.state.executionStatus = conversationExecutionStatus.ERROR;
+      } else if (isLLMAuthenticationError(error)) {
+        this.state.executionStatus = conversationExecutionStatus.ERROR;
+        await this.state.appendEventAsync(conversationErrorEventSchema.parse({
+          source: 'environment', code: 'LLMAuthenticationError',
+          detail: 'Your LLM API key appears to be invalid or has expired.',
+        }));
+      }
+      throw error;
     } finally {
       this.runInProgress = null;
     }
@@ -83,16 +104,16 @@ export class LocalConversation {
 
   /** Force one condensation step after the currently executing step, without resuming a run. */
   async condense(): Promise<void> {
-    await this.withStepLock(async () => {
+    await withLLMCallContext(this.callContext, () => this.withStepLock(async () => {
       if (this.agent.condenser instanceof AgentResetCondenser) throw new AgentControlledCondensationError();
       if (this.agent.condenser?.handlesCondensationRequests?.() !== true) {
         throw new Error('Cannot condense conversation: configure a condenser that handles condensation requests.');
       }
       await this.state.appendEventAsync(condensationRequestSchema.parse({}));
       // A maintenance summary does not answer queued user input.
-      await this.agent.step(this.state);
+      await this.agent.step(this.state, { callContext: this.callContext });
       this.activeAgent = await applyAgentStepBoundary(this.agent, this.state, this.onStepBoundary);
-    });
+    }));
   }
 
   private withStepLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -125,7 +146,7 @@ export class LocalConversation {
         if (this.stuckDetector !== null && this.checkStuckOrNudge()) return;
 
         this.stepUserMessageId = latestUserMessageId(this.state.events);
-        const emitted = await this.agent.step(this.state);
+        const emitted = await this.agent.step(this.state, { callContext: this.callContext });
         iteration += 1;
 
         if (emitted.some(isSuccessfulFinishObservation)) {

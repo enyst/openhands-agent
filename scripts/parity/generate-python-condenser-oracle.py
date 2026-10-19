@@ -10,7 +10,6 @@ import inspect
 import json
 import subprocess
 from pathlib import Path
-from jinja2 import Environment
 from openhands.sdk.context.condenser import LLMSummarizingCondenser
 from openhands.sdk.event import ActionEvent, AgentErrorEvent, CondensationSummaryEvent, MessageEvent, ObservationEvent, SystemPromptEvent, UserRejectObservation
 from openhands.sdk.llm import ImageContent, Message, MessageToolCall, TextContent, ThinkingBlock
@@ -52,11 +51,18 @@ def main():
         data['id']=f'fixture-{i}'
         data['timestamp']='2026-01-01T00:00:00Z'
         cases.append({'name':f'{i}-{event.__class__.__name__}', 'event':data, 'text':str(event)})
-    template=(checkout/'openhands-sdk/openhands/sdk/context/condenser/prompts/summarizing_prompt.j2').read_text()
     event_strings=[str(event) for event in events]
-    prompt=Environment(autoescape=False).from_string(template).render(events=event_strings)
+    # Exercise the actual source builder, including its template-loading behavior.
+    # It needs no configured LLM and never makes a provider request.
+    condenser = LLMSummarizingCondenser.model_construct()
+    prompts=[]
+    for name, strings in [('empty', []), ('single', event_strings[:1]), ('multiple', event_strings)]:
+        messages = condenser._build_summary_messages(strings)
+        prompts.append({'name':name, 'event_strings':strings, 'messages':[
+            {'role':message.role, 'text':message.content[0].text} for message in messages
+        ]})
     truncation=[{'input':'🙂abcdef' * 80, 'limit':limit, 'text':maybe_truncate('🙂abcdef' * 80, truncate_after=limit)} for limit in [0,1,100,130,131,300]]
-    args.output.write_text(json.dumps({'upstream_commit':pin,'cases':cases,'prompt':prompt,'truncation':truncation},indent=2,ensure_ascii=False)+'\n')
-    print(f'Generated {len(cases)} prompt event cases and {len(truncation)} truncation cases')
+    args.output.write_text(json.dumps({'upstream_commit':pin,'cases':cases,'prompts':prompts,'truncation':truncation},indent=2,ensure_ascii=False)+'\n')
+    print(f'Generated {len(cases)} prompt event cases, {len(prompts)} message pairs and {len(truncation)} truncation cases')
 
 if __name__=='__main__': main()

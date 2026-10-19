@@ -1,4 +1,5 @@
 import type { LLMProfile, PromptCacheRetention, ReasoningEffort } from './index.js';
+import { PROMPT_CACHE_KEY_MODELS } from './prompt-cache-models.js';
 
 export const ANTHROPIC_THINKING_MIN_BUDGET = 1024;
 export const ANTHROPIC_THINKING_MAX_BUDGET = 128000;
@@ -39,7 +40,7 @@ export function isOpenAISubscriptionEndpoint(profile: LLMProfile): boolean {
 }
 
 export function supportsOpenAIPromptCacheRetention(profile: LLMProfile): boolean {
-  if (profile.providerId !== 'openai' || isOpenAISubscriptionEndpoint(profile) || !isGpt56Model(profile.model)) {
+  if (profile.providerId !== 'openai' || profile.authType === 'subscription' || isOpenAISubscriptionEndpoint(profile) || !isGpt56Model(profile.model)) {
     return false;
   }
   const baseUrl = profile.baseUrl?.trim().toLowerCase();
@@ -53,11 +54,20 @@ export function resolveOpenAIPromptCacheRetention(profile: LLMProfile): PromptCa
   return profile.promptCacheRetention ?? '24h';
 }
 
-export function resolveOpenAIPromptCacheKey(profile: LLMProfile): string | undefined {
-  if (!supportsOpenAIPromptCacheRetention(profile)) {
-    return undefined;
-  }
-  return profile.promptCacheKey ?? undefined;
+export function normalizeOpenAIModelName(model: string): string {
+  return model.trim().toLowerCase().replace(/^(?:litellm_proxy|openhands)\//u, '')
+    .replace(/^(?:prod|dev|staging|test)\//u, '').replace(/^openai\//u, '');
+}
+
+const cacheKeyModels: ReadonlySet<string> = new Set(PROMPT_CACHE_KEY_MODELS);
+
+export function supportsOpenAIPromptCacheKey(profile: LLMProfile): boolean {
+  return profile.supportsPromptCacheKey ?? cacheKeyModels.has(normalizeOpenAIModelName(profile.model));
+}
+
+export function resolveOpenAIPromptCacheKey(profile: LLMProfile, contextKey?: string | null): string | undefined {
+  if (!supportsOpenAIPromptCacheKey(profile)) return undefined;
+  return contextKey || profile.promptCacheKey || undefined;
 }
 
 

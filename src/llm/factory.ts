@@ -4,10 +4,9 @@ import type { LLMClient } from './client.js';
 import { createGeminiClientFromProfile } from './gemini.js';
 import type { LLMProfile } from './index.js';
 import { createOpenAIChatClientFromProfile, createOpenAIResponsesClientFromProfile, type CreateLlmClientOptions } from './openai.js';
+import { resolveOpenAiApiMode, resolveProviderFromProfile } from './transport.js';
 
-const DETECTED_LLM_PROVIDERS = ['anthropic', 'gemini', 'openai', 'openrouter', 'litellm_proxy'] as const;
-
-export type DetectedLlmProvider = (typeof DETECTED_LLM_PROVIDERS)[number];
+export { detectProviderFromBaseUrl, resolveProviderFromProfile, type DetectedLlmProvider } from './transport.js';
 
 export async function createClientFromProfile(
   profile: LLMProfile,
@@ -24,37 +23,10 @@ export async function createClientFromProfile(
   if (provider === 'gemini') {
     return createGeminiClientFromProfile(profile, store, options);
   }
-  if (profile.openAiApiMode === 'responses') {
-    return createOpenAIResponsesClientFromProfile(profile, store, options);
+  const mode = resolveOpenAiApiMode(profile);
+  const resolvedProfile = { ...profile, openAiApiMode: mode };
+  if (mode === 'responses') {
+    return createOpenAIResponsesClientFromProfile(resolvedProfile, store, options);
   }
-  return createOpenAIChatClientFromProfile(profile, store, options);
-}
-
-export function resolveProviderFromProfile(profile: LLMProfile): DetectedLlmProvider {
-  const providerId = profile.providerId.toLowerCase();
-  if (isDetectedLlmProvider(providerId)) {
-    return providerId;
-  }
-  return detectProviderFromBaseUrl(profile.baseUrl);
-}
-
-export function detectProviderFromBaseUrl(baseUrl?: string | null): DetectedLlmProvider {
-  const normalized = (baseUrl ?? '').toLowerCase();
-  if (normalized.includes('anthropic')) {
-    return 'anthropic';
-  }
-  if (normalized.includes('generativelanguage.googleapis.com') || normalized.includes('ai.google.dev') || normalized.includes('gemini')) {
-    return 'gemini';
-  }
-  if (normalized.includes('openrouter')) {
-    return 'openrouter';
-  }
-  if (normalized.includes('litellm') || normalized.includes('llm-proxy')) {
-    return 'litellm_proxy';
-  }
-  return 'openai';
-}
-
-function isDetectedLlmProvider(providerId: string): providerId is DetectedLlmProvider {
-  return DETECTED_LLM_PROVIDERS.includes(providerId as DetectedLlmProvider);
+  return createOpenAIChatClientFromProfile(resolvedProfile, store, options);
 }

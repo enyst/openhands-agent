@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { llmConvertibleEventSchema } from '../../event/index.js';
-import { renderCondenserEvent, renderSummarizingPrompt, truncateCondenserEvent } from '../condenser-prompt.js';
+import { renderCondenserEvent, renderSummarizingEventsPrompt, renderSummarizingSystemPrompt, renderSummarizingPrompt, truncateCondenserEvent } from '../condenser-prompt.js';
 import oracle from './fixtures/python-condenser-oracle.json';
 
-// Generated from real pinned Python event renderers and the original Jinja template.
+// Generated from real pinned Python event renderers and the source summary-message builder.
 describe('pinned Python summarizer prompt oracle', () => {
   it('is bound to the shared manifest pin', () => {
     const manifest = JSON.parse(readFileSync(new URL('../../../transpile/upstream.json', import.meta.url), 'utf8'));
@@ -14,10 +14,18 @@ describe('pinned Python summarizer prompt oracle', () => {
     const event = llmConvertibleEventSchema.parse(raw);
     expect(renderCondenserEvent(event)).toBe(text);
   });
-  it('renders the original prompt with exact whitespace and no opaque signature payloads', () => {
-    expect(renderSummarizingPrompt(oracle.cases.map(test => test.text))).toBe(oracle.prompt);
-    expect(oracle.prompt).not.toContain('opaque-signature');
-    expect(oracle.prompt).not.toContain('private thinking');
+  it.each(oracle.prompts)('$name renders both message roles with exact whitespace and no opaque signature payloads', ({ event_strings, messages }) => {
+    const rendered = [
+      { role: 'system', text: renderSummarizingSystemPrompt() },
+      { role: 'user', text: renderSummarizingEventsPrompt(event_strings) },
+    ];
+    expect(rendered).toEqual(messages);
+    expect(JSON.stringify(rendered)).not.toContain('opaque-signature');
+    expect(JSON.stringify(rendered)).not.toContain('private thinking');
+  });
+  it('preserves the legacy combined-text helper for callers outside the condenser', () => {
+    const events = oracle.cases.map(test => test.text);
+    expect(renderSummarizingPrompt(events)).toBe(renderSummarizingSystemPrompt() + '\n\n\n' + renderSummarizingEventsPrompt(events));
   });
   it.each(oracle.truncation)('ports middle clipping by Unicode code points with limit $limit', ({ input, limit, text }) => {
     expect(truncateCondenserEvent(input, limit)).toBe(text);

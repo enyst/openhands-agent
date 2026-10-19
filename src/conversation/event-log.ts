@@ -1,4 +1,5 @@
 import { eventSchema, ROOT_PARENT_ID, type Event } from '../event/index.js';
+import { serializeMcpToolWire } from '../mcp/wire.js';
 import type { FileStore } from '../io/index.js';
 
 export const EVENTS_DIR = 'events';
@@ -304,12 +305,26 @@ function serializeEvent(event: Event): string {
   if (event.kind === 'ConversationStateUpdateEvent' && event.key === 'llm_usage') {
     return `${JSON.stringify(event)}\n`;
   }
-  return `${JSON.stringify(event, (_key, value: unknown) => {
+  const serialized = JSON.stringify(event, (_key, value: unknown) => {
     if (value instanceof Set) {
       return [...(value as Set<unknown>)];
     }
     return value === null ? undefined : value;
-  })}\n`;
+  });
+  if (event.kind === 'SystemPromptEvent') {
+    // Optional event/model nulls are omitted above. MCP schemas and extension
+    // metadata are opaque JSON: const:null and metadata nulls must survive.
+    // Normalize at write time too, because callers can construct typed events
+    // without passing them through a schema parser.
+    const payload = JSON.parse(serialized) as { tools: Record<string, unknown>[] };
+    payload.tools = payload.tools.map((tool, index) => {
+      const original = event.tools[index]!;
+      return Object.hasOwn(original, 'mcp_tool')
+        ? { ...tool, mcp_tool: serializeMcpToolWire(original.mcp_tool) } : tool;
+    });
+    return `${JSON.stringify(payload)}\n`;
+  }
+  return `${serialized}\n`;
 }
 
 function isEventFileName(name: string): boolean {

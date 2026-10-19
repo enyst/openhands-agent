@@ -44,7 +44,8 @@ describe('native provider context overflow mapping', () => {
     ['content policy', 400, { error: { code: 'content_policy_violation', message: 'Output blocked by content filtering policy' } }],
     ['cache minimum', 400, { error: { message: 'The minimum token count to start caching is 4096.' } }],
   ])('%s does not trigger context recovery', async (_name, status, body) => {
-    const error = await errorOf(new OpenAIResponsesClient(profile(), 'key', response(body, status)));
+    // This table tests classification, not retries (covered in request-recovery).
+    const error = await errorOf(new OpenAIResponsesClient(profile(), 'key', response(body, status), undefined, undefined, { retry: { maxAttempts: 1 } }));
     expect(isContextWindowExceeded(error)).toBe(false);
     expect(looksLikeMalformedConversationHistoryError(error)).toBe(false);
   });

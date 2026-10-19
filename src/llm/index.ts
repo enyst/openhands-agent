@@ -23,7 +23,8 @@ export const llmProfileSchema = z
     authType: z.enum(['api_key', 'subscription']).default('api_key'),
     subscriptionVendor: z.literal('openai').nullable().default(null),
     baseUrl: z.string().url().nullable().default(null),
-    openAiApiMode: openAiApiModeSchema.default('chat_completions'),
+    // Omission permits the provider factory's model default; saved explicit modes win.
+    openAiApiMode: openAiApiModeSchema.optional(),
     temperature: z.number().min(0).nullable().default(null),
     topP: z.number().min(0).max(1).nullable().default(null),
     topK: z.number().int().positive().nullable().default(null),
@@ -37,6 +38,7 @@ export const llmProfileSchema = z
     anthropicCacheTtl: anthropicCacheTtlSchema.optional(),
     promptCacheRetention: promptCacheRetentionSchema.nullable().default(null),
     promptCacheKey: z.string().min(1).nullable().default(null),
+    supportsPromptCacheKey: z.boolean().optional(),
     headers: z.record(z.string(), z.string()).default({}),
     useProfileKeyOverride: z.boolean().default(false),
   })

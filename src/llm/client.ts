@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { ToolDefinition } from '../tool/index.js';
 import { messageSchema, type LLMProfile, type Message } from './index.js';
+import type { LLMCallContext } from './call-context.js';
 
 export interface FetchResponseLike {
   readonly body?: { getReader(): { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<void> } } | null;
@@ -19,6 +20,10 @@ export type FetchLike = (
 /** Stored SystemPromptEvent tools and executable tool definitions share a count boundary. */
 export type LLMTokenCountTool = ToolDefinition | Readonly<Record<string, unknown>>;
 
+export interface LLMCompletionOptions {
+  readonly callContext?: LLMCallContext | null;
+}
+
 export interface LLMClient {
   readonly profile: LLMProfile;
   /** Profile override first, then known metadata; null means unknown. No I/O in this getter. */
@@ -28,7 +33,7 @@ export interface LLMClient {
   getTokenCount?(messages: readonly Message[], tools?: readonly LLMTokenCountTool[]): Promise<number | null>;
   /** Resolve route metadata before reading the effective limit; failed discovery stays unknown. */
   resolveRuntimeMetadata?(): Promise<void>;
-  complete(messages: readonly Message[], tools?: readonly ToolDefinition[]): Promise<LLMCompletionResponse>;
+  complete(messages: readonly Message[], tools?: readonly ToolDefinition[], options?: LLMCompletionOptions): Promise<LLMCompletionResponse>;
 }
 
 export const llmUsageSchema = z

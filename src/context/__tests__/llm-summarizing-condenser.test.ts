@@ -181,11 +181,12 @@ describe('LLMSummarizingCondenser pinned behavior with explicit target policy', 
     expect(await c.hardContextReset(new context.View([user('public fixture '.repeat(4))]))).toBeNull();
     expect(generate.mock.calls.map(call => call[2])).toEqual([null, 8, 0, 0, 0]);
     const prompts = complete.mock.calls.map(([messages]) => {
-      const first = messages[0]!.content[0]!;
+      const first = messages[1]!.content[0]!;
       if (first.type !== 'text') throw new Error('Expected text summary prompt');
       return first.text;
     });
-    expect(prompts.map(prompt => [...prompt].length)).toEqual([2120, 2040, 2120, 2120, 2120]);
+    // dcf401af splits the unchanged instructions into a separate system message.
+    expect(prompts.map(prompt => [...prompt].length)).toEqual([155, 75, 155, 155, 155]);
     expect(prompts.slice(2)).toEqual([prompts[0], prompts[0], prompts[0]]);
   });
 

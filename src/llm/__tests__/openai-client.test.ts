@@ -693,6 +693,12 @@ describe('OpenAI chat message serialization parity', () => {
 
     for (const body of [gpt51, litellmAlias, subscriptionEndpoint, openAINamedProxy, futureSimilarModel, disabled]) {
       expect(body).not.toHaveProperty('prompt_cache_retention');
+    }
+    // PORT: 7401022 separates supported cache keys from extended retention.
+    for (const body of [gpt51, litellmAlias, openAINamedProxy]) {
+      expect(body.prompt_cache_key).toBe('ignored-key');
+    }
+    for (const body of [subscriptionEndpoint, futureSimilarModel, disabled]) {
       expect(body).not.toHaveProperty('prompt_cache_key');
     }
   });

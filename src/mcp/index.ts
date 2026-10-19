@@ -1,4 +1,6 @@
 import { imageContent, textContent, type Content } from '../llm/index.js';
+import { normalizeMcpToolWire } from './wire.js';
+export { normalizeMcpToolWire } from './wire.js';
 
 export class MCPError extends Error {}
 
@@ -27,9 +29,11 @@ export interface McpCallToolResult {
 }
 
 export interface McpToolSpec {
+  readonly [key: string]: unknown;
   readonly name: string;
   readonly description?: string | null;
   readonly inputSchema?: Record<string, unknown>;
+  readonly input_schema?: Record<string, unknown>;
   readonly annotations?: Record<string, unknown> | null;
   readonly meta?: Record<string, unknown> | null;
 }
@@ -121,6 +125,7 @@ export class MCPToolExecutor {
 }
 
 export class MCPToolDefinition {
+  private readonly wireSpec: Record<string, unknown>;
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
@@ -129,11 +134,13 @@ export class MCPToolDefinition {
   readonly executor: MCPToolExecutor;
 
   constructor(spec: McpToolSpec, client: McpClientLike) {
+    const wire = normalizeMcpToolWire(spec) as McpToolSpec;
     this.name = spec.name;
     this.description = spec.description ?? 'No description provided';
-    this.inputSchema = spec.inputSchema ?? { type: 'object', properties: {} };
-    this.annotations = spec.annotations ?? null;
-    this.meta = spec.meta ?? null;
+    this.inputSchema = wire.inputSchema ?? { type: 'object', properties: {} };
+    this.annotations = wire.annotations ?? null;
+    this.meta = (wire._meta as Record<string, unknown> | null | undefined) ?? null;
+    this.wireSpec = { ...wire, name: this.name, inputSchema: this.inputSchema };
     this.executor = new MCPToolExecutor(spec.name, client);
   }
 
@@ -150,7 +157,7 @@ export class MCPToolDefinition {
     if (inputSchema !== undefined || outputSchema !== undefined) {
       throw new Error('MCPTool.toMcpTool does not support overriding schemas');
     }
-    return { name: this.name, description: this.description, inputSchema: this.inputSchema };
+    return { ...this.wireSpec };
   }
 
   toOpenAiTool(): Record<string, unknown> {

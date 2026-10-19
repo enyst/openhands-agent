@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { condenserSettingsSchema, hardCondenserSettingsSchema } from './condenser-settings.js';
+import { metaProfileLlmsSchema, metaProfileSchema } from '../meta-profiles/index.js';
 export * from './condenser-settings.js';
 
 import {
@@ -80,6 +81,10 @@ export const openHandsAgentSettingsSchema = z
     tools: z.array(z.unknown()).nullable().default(null),
     enable_sub_agents: z.boolean().default(false),
     enable_switch_llm_tool: z.boolean().default(true),
+    enable_classify_and_switch_llm_tool: z.boolean().default(false),
+    active_meta_profile: z.string().nullable().default(null),
+    meta_profile: metaProfileSchema.nullable().default(null),
+    meta_profile_llms: metaProfileLlmsSchema.default({}),
     tool_concurrency_limit: z.number().int().min(1).default(1),
     condenser: condenserSettingsSchema.prefault({}),
     hard_condenser: hardCondenserSettingsSchema.nullable().optional(),

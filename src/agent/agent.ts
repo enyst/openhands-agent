@@ -17,6 +17,7 @@ import { CondenseTool } from '../tool/condense.js';
 import { executeCondenseTool, finishPendingContextReset, recoverContextWindow, type HardCondenser } from './context-reset.js';
 import type { AgentContext } from '../context/index.js';
 import { LLMResponseError, type LLMClient } from '../llm/client.js';
+import { getLLMCallContext, withLLMCallContext, type LLMCallContext } from '../llm/call-context.js';
 import { createLlmUsageEvent } from '../llm/metrics.js';
 import { latestReportedInputTokens } from '../llm/reported-input.js';
 import { historyForProfile } from '../llm/history.js';
@@ -70,7 +71,12 @@ export class Agent {
     this.usageId = options.usageId;
   }
 
-  async step(state: ConversationState): Promise<readonly Event[]> {
+  async step(state: ConversationState, options: { readonly callContext?: LLMCallContext | null } = {}): Promise<readonly Event[]> {
+    const callContext = getLLMCallContext(options.callContext);
+    return withLLMCallContext(callContext, () => this.stepWithContext(state, callContext));
+  }
+
+  private async stepWithContext(state: ConversationState, callContext: LLMCallContext): Promise<readonly Event[]> {
     if (this.condenser instanceof AgentResetCondenser) {
       const recovered = await finishPendingContextReset(state);
       if (recovered !== null) return recovered;
@@ -79,7 +85,7 @@ export class Agent {
     const inputEventId = history.at(-1)?.id ?? null;
     const system = this.renderSystemPrompt();
     await this.llm.resolveRuntimeMetadata?.();
-    const context = this.condenserContext(state, history, system);
+    const context = this.condenserContext(state, history, system, callContext);
     if (this.condenser instanceof AgentResetCondenser) {
       const warning = await contextWarningEvent(history, View.fromEvents(history), this.llm, this.condenser.warningThresholds, context);
       if (warning !== null) {
@@ -95,7 +101,7 @@ export class Agent {
     let response;
     const startedAt = Date.now();
     try {
-      response = await this.llm.complete(messages, this.tools.filter((tool) => tool.usable));
+      response = await this.llm.complete(messages, this.tools.filter((tool) => tool.usable), { callContext });
     } catch (error) {
       if (error instanceof LLMResponseError) {
         await state.appendEventAsync(createLlmUsageEvent(this.llm.profile, error.metadata, {
@@ -159,12 +165,13 @@ export class Agent {
     return [...context.messagesForEvents!(condensed.events.filter(isLlmConvertibleEvent))];
   }
 
-  private condenserContext(state: ConversationState, history: readonly Event[], system: TextContent[] | null): CondenserContext {
+  private condenserContext(state: ConversationState, history: readonly Event[], system: TextContent[] | null, callContext: LLMCallContext): CondenserContext {
     const projectEvents = (events: readonly LLMConvertibleEvent[], profile: typeof this.llm.profile) =>
       historyForProfile(historyForRequests(events, history), history, profile, this.llm.profile);
     const reportedTokens = this.condenser === null ? undefined
       : latestReportedInputTokens(history, this.llm.profile, this.usageId);
     return {
+      callContext,
       ...(reportedTokens === undefined ? {} : { reportedInputTokens: reportedTokens }),
       tools: this.tools.filter(tool => tool.usable),
       messagesForEvents: events => {

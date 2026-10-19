@@ -4,6 +4,7 @@ import { actionEventSchema, observationEventSchema } from '../../event/index.js'
 import type { ActionEvent } from '../../event/index.js';
 import { cancellationToken } from '../state.js';
 import { ParallelToolExecutor } from '../parallel-executor.js';
+import { LLMUsagePersistenceError } from '../../llm/usage-persistence.js';
 
 describe('ParallelToolExecutor', () => {
   it('executes batches concurrently while preserving input order', async () => {
@@ -42,6 +43,34 @@ describe('ParallelToolExecutor', () => {
     const results = await executor.executeBatch([actionEvent('action-1', 'call-1')], async () => [], { cancelToken: token });
 
     expect(results[0]?.[0]).toMatchObject({ kind: 'AgentErrorEvent', tool_call_id: 'call-1', error: 'Tool call cancelled by interrupt.' });
+  });
+
+  it('drains started siblings and skips queued actions before propagating fatal accounting failure', async () => {
+    const executor = new ParallelToolExecutor({ maxConcurrency: 2 });
+    const failure = new LLMUsagePersistenceError(new Error('disk full'));
+    const started: string[] = [];
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    let settled = false;
+    let siblingFinished = false;
+    const pending = executor.executeBatch([
+      actionEvent('fatal', 'call-1'), actionEvent('sibling', 'call-2'), actionEvent('queued', 'call-3'),
+    ], async action => {
+      started.push(action.id);
+      if (action.id === 'fatal') throw failure;
+      await barrier;
+      siblingFinished = true;
+      return [];
+    }).finally(() => { settled = true; });
+    const rejected = expect(pending).rejects.toBe(failure);
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    expect(started).toEqual(['fatal', 'sibling']);
+    expect(settled).toBe(false);
+    expect(siblingFinished).toBe(false);
+    release();
+    await rejected;
+    expect(siblingFinished).toBe(true);
+    expect(started).toEqual(['fatal', 'sibling']);
   });
 });
 

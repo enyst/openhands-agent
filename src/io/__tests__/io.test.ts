@@ -101,6 +101,22 @@ describe('LocalFileStore', () => {
     }
   });
 
+  it.each(['sync', 'async'] as const)('can disable stale lock reaping for %s callers', async mode => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'openhands-agent-io-'));
+    try {
+      const store = new LocalFileStore(dir);
+      const contents = '999999999\n2026-01-01T00:00:00.000Z\n';
+      store.write('locks/test.lock', contents);
+      const options = { timeoutSeconds: 0.01, pollIntervalMs: 1, recoverStaleLocks: false };
+      let invoked = false;
+      const callback = () => { invoked = true; };
+      if (mode === 'sync') expect(() => store.lock('locks/test.lock', callback, options)).toThrow();
+      else await expect(store.lockAsync('locks/test.lock', callback, options)).rejects.toMatchObject({ code: 'EEXIST' });
+      expect(invoked).toBe(false);
+      expect(store.read('locks/test.lock')).toBe(contents);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
   it('rejects reentrant and asynchronous local lock callbacks', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'openhands-agent-io-'));
     try {
