@@ -299,7 +299,10 @@ async function runGitProbe(args: readonly string[], cwd: string): Promise<string
 export async function getChangesInRepo(repoDir: string, ref?: string | null): Promise<GitChange[]> {
   const repo = await validateGitRepository(repoDir);
   const base = await getValidRef(repo, ref, 'display');
-  const output = await runGitCommand(['git', '--no-pager', 'diff', '--name-status', base], { cwd: repo });
+  // ``--relative`` scopes the diff to ``repo`` and prints paths relative to it,
+  // the same base as ``git ls-files --others`` below, so a subdirectory of a
+  // repository does not mix repository-relative and subdirectory-relative paths.
+  const output = await runGitCommand(['git', '--no-pager', 'diff', '--name-status', '--relative', base], { cwd: repo });
   const changes = parseNameStatus(output.split(/\r?\n/u).filter((entry) => entry.trim().length > 0));
   const untracked = await runGitCommand(['git', '--no-pager', 'ls-files', '--others', '--exclude-standard'], { cwd: repo }).catch(() => '');
   for (const path of untracked.split(/\r?\n/u).filter((entry) => entry.trim().length > 0)) {

@@ -397,7 +397,9 @@
       "reason": "list git changes of a repository subdirectory relative to it (src/git)",
       "policy": null,
       "tracking": [],
-      "evidence": [],
+      "evidence": [
+        "src/git/__tests__/nested-changes.test.ts"
+      ],
       "compatibilityConsequence": null,
       "revisitTrigger": null,
       "docsImpact": "none",
