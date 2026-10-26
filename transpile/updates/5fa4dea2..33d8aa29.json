@@ -61,8 +61,8 @@
       "docs": []
     },
     "a6c7bf5591f64ca62c653565d7498d72e155e789:sdk": {
-      "disposition": "PORT",
-      "reason": "install the posted LLM when switch_llm targets a registered usage_id (src/conversation/local-conversation.ts)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "LocalConversation.switch_llm is registry-driven (llm_registry, create_subscription_llm_from_config, restore_metrics); the TS port has no llm_registry and no conversation-level switch_llm — switching is host-mediated through SwitchLLMTool.switchProfile — so there is no counterpart path to change.",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -149,8 +149,8 @@
       "docs": []
     },
     "cab7bb4b29476cf4a70150f5f94ba97f22766b9a:sdk": {
-      "disposition": "PORT",
-      "reason": "reject skill installs with unparsable frontmatter as invalid (src/skills)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "the install-time frontmatter parse/reject path has no TS counterpart: src/skills/catalog.ts only statically types the SKILLS.md frontmatter and the TS port has no skill-install surface.",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -160,13 +160,15 @@
       "docs": []
     },
     "acf55bcd26729d3f9212d5d5334047b6cd595d2a:sdk": {
-      "disposition": "PORT",
-      "reason": "drop Bedrock-only ids from the supported model list (regenerate src/llm/verified-models.ts)",
+      "disposition": "DEFERRED",
+      "reason": "get_supported_llm_models now drops non-prefixed Bedrock-only ids via _is_litellm_bedrock_model; the offline getSupportedLLMModels filters only the bedrock prefix and needs a generated bedrock-provider id set plus a catalog regeneration under the pinned litellm environment.",
       "policy": null,
-      "tracking": [],
+      "tracking": [
+        "acf55bcd26729d3f9212d5d5334047b6cd595d2a"
+      ],
       "evidence": [],
-      "compatibilityConsequence": null,
-      "revisitTrigger": null,
+      "compatibilityConsequence": "getSupportedLLMModels() still returns Bedrock-only ids (e.g. deepseek.r1-v1:0, us.anthropic.claude-*) that upstream v1.56.0 no longer lists.",
+      "revisitTrigger": "next interval; regenerate src/llm/model-discovery-catalog.ts with a LOCKED_BEDROCK_PROVIDER_IDS set and filter it in src/llm/model-discovery.ts.",
       "docsImpact": "none",
       "docs": []
     },
@@ -358,8 +360,8 @@
       "docs": []
     },
     "8ee5cba234d14f7841b52c3c8259a884a9179fdb:sdk": {
-      "disposition": "PORT",
-      "reason": "guard LLM profile delete through the .json alias (src/profiles)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "llm_profile_store.py and profile_refs.py belong to the agent-server profile store, not the SDK; src/profiles is schema-only (no LLMProfileStore, no referrer scan/rewrite), so the .json-alias guard has no TS counterpart.",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -646,13 +648,15 @@
       "docs": []
     },
     "33d8aa29c3078d074799e2fbf5e847aeb2d71360:sdk": {
-      "disposition": "PORT",
-      "reason": "release removes deprecated tool-switch folding (enable_sub_agents/enable_switch_llm_tool) and simplifies settings/agent_profile; TS port still has the deprecated fold path",
+      "disposition": "DEFERRED",
+      "reason": "v1.56.0 removes the deprecated tool-switch folding (enable_sub_agents/enable_switch_llm_tool), bumps AGENT_PROFILE_SCHEMA_VERSION 3->4 and AGENT_SETTINGS_SCHEMA_VERSION 8->9, removes ACPAgentSettings.llm, and drops the enable_browser prompt kwarg; the TS port still carries the deprecated fold path and the old schema versions.",
       "policy": null,
-      "tracking": [],
+      "tracking": [
+        "33d8aa29c3078d074799e2fbf5e847aeb2d71360"
+      ],
       "evidence": [],
-      "compatibilityConsequence": null,
-      "revisitTrigger": null,
+      "compatibilityConsequence": "TS still validates/persists profiles and settings at schema v3/v8 and folds the retired switches; upstream v1.56.0 is v4/v9 and rejects them.",
+      "revisitTrigger": "next interval; port the v1.56.0 fold removal across src/profiles, src/settings, src/tool/defaults, and src/agent.",
       "docsImpact": "none",
       "docs": []
     },
