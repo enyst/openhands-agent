@@ -171,8 +171,8 @@
       "docs": []
     },
     "3adf42f6377b570dfea53cc02bc669e1515f18f8:sdk": {
-      "disposition": "PORT",
-      "reason": "expand ~ in OH_PERSISTENCE_DIR for the meta-profile store (src/meta-profiles)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "TS defaultMetaProfileDir() already resolves through getUserPersistenceDir(), which expands ~ and relative paths; the ~ expansion is already present",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -259,8 +259,8 @@
       "docs": []
     },
     "8d2c996de5bf4bc558c03451618124c49df24397:sdk": {
-      "disposition": "PORT",
-      "reason": "keep streamed deltas out of RemoteConversation.state.events (src/conversation/remote-conversation.ts)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "filters StreamingDeltaEvent frames out of RemoteEventsList; TS remote conversation is REST-polling only (state.events built from /events/search) and delivers no streamed deltas, so there is no streamed-delta path to filter",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -303,8 +303,8 @@
       "docs": []
     },
     "47c50f7e5c6862822990065b6eee23718f5e650e:sdk": {
-      "disposition": "PORT",
-      "reason": "short tmux sockets for overlong paths (src/tools terminal executor)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "tmux_terminal.py socket-path fix; the TS port uses the exec-based terminal executor (DEV-SDK-006) and has no tmux socket path",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -347,8 +347,8 @@
       "docs": []
     },
     "b301ee008178ec4a357d3c2bc6370495c6ce1e3f:sdk": {
-      "disposition": "PORT",
-      "reason": "deliver streamed deltas to RemoteConversation token_callbacks (src/conversation/remote-conversation.ts)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "delivers streamed deltas to RemoteConversation token_callbacks; TS remote conversation exposes no token_callbacks/streaming surface (REST-polling only)",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -602,8 +602,8 @@
       "docs": []
     },
     "6ae64079cfd30cfe2f01a060c59168a4d650d883:sdk": {
-      "disposition": "PORT",
-      "reason": "add ghu_/ghs_/gho_ GitHub token patterns to secret redaction (src/utils)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "extends redact_api_key_literals, a bare API-key-literal scanner the TS port does not implement; redactTextSecrets covers key=value, quoted-dict and anthropic-key literals only, so there is no literal list to extend",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -613,8 +613,8 @@
       "docs": []
     },
     "3f3294581ebf40f3bbe5b96aec1d28b7fec96226:sdk": {
-      "disposition": "PORT",
-      "reason": "pass events missed during a WebSocket reconnect to RemoteConversation callbacks (src/conversation/remote-conversation.ts)",
+      "disposition": "NO_TARGET_CHANGE",
+      "reason": "replays events missed during a WebSocket reconnect; TS remote conversation has no WebSocket transport, so reconnect replay has no counterpart",
       "policy": null,
       "tracking": [],
       "evidence": [],
