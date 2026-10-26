@@ -26,6 +26,15 @@ describe('MetaProfile schemas and storage', () => {
     expect(new MetaProfileStore().baseDir).toBe(path.join(root, 'meta-profiles'));
   });
 
+  test('default directory expands a bare `~` and `~/state` OH_PERSISTENCE_DIR', async () => {
+    const home = await directory();
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('OH_PERSISTENCE_DIR', '~');
+    expect(new MetaProfileStore().baseDir).toBe(path.join(home, 'meta-profiles'));
+    vi.stubEnv('OH_PERSISTENCE_DIR', '~/state');
+    expect(new MetaProfileStore().baseDir).toBe(path.join(home, 'state', 'meta-profiles'));
+  });
+
   test('round trips UTF-8, accepts one .json suffix and reads external overwrites freshly', async () => {
     const root = await directory();
     const store = new MetaProfileStore(root);

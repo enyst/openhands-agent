@@ -28,3 +28,17 @@ it('retains ordinary public headers', () => {
   const text = "{'content-type': 'application/json', 'x-title': 'OpenHands'}";
   expect(redactTextSecrets(text)).toBe(text);
 });
+it.each([
+  ['ghu_', 'ghu_1234567890abcdef1234567890abcd'],
+  ['ghs_', 'ghs_1234567890abcdef1234567890abcd'],
+  ['gho_', 'gho_1234567890abcdef1234567890abcd'],
+])('redacts the %s GitHub token literal', (_prefix, token) => {
+  const text = `secret leaked ${token} in a log line`;
+  expect(redactTextSecrets(text)).not.toContain(token);
+  expect(redactTextSecrets(text)).toContain('<redacted>');
+});
+
+it('does not redact short GitHub token fragments', () => {
+  const text = 'ghu_short ghs_short gho_short';
+  expect(redactTextSecrets(text)).toBe(text);
+});

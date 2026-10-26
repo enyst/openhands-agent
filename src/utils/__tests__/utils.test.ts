@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -94,6 +94,18 @@ describe('path utilities', () => {
 
       process.env.OH_PERSISTENCE_DIR = 'relative/persist';
       expect(getUserPersistenceDir()).toBe(resolve('relative/persist'));
+
+      process.env.OH_PERSISTENCE_DIR = '~';
+      expect(getUserPersistenceDir()).toBe(homedir());
+
+      process.env.OH_PERSISTENCE_DIR = '~/state';
+      expect(getUserPersistenceDir()).toBe(join(homedir(), 'state'));
+
+      process.env.OH_PERSISTENCE_DIR = `~${'fakeuser'}`;
+      expect(getUserPersistenceDir()).toBe(join(dirname(homedir()), 'fakeuser'));
+
+      process.env.OH_PERSISTENCE_DIR = '~/~/nested';
+      expect(getUserPersistenceDir()).toBe(join(homedir(), '~', 'nested'));
     } finally {
       if (original === undefined) {
         delete process.env.OH_PERSISTENCE_DIR;

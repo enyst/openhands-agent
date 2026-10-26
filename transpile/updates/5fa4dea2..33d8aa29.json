@@ -62,7 +62,7 @@
     },
     "a6c7bf5591f64ca62c653565d7498d72e155e789:sdk": {
       "disposition": "NO_TARGET_CHANGE",
-      "reason": "LocalConversation.switch_llm is registry-driven (llm_registry, create_subscription_llm_from_config, restore_metrics); the TS port has no llm_registry and no conversation-level switch_llm — switching is host-mediated through SwitchLLMTool.switchProfile — so there is no counterpart path to change.",
+      "reason": "LocalConversation.switch_llm is registry-driven (llm_registry, create_subscription_llm_from_config, restore_metrics); the TS port has no llm_registry and no conversation-level switch_llm \u2014 switching is host-mediated through SwitchLLMTool.switchProfile \u2014 so there is no counterpart path to change.",
       "policy": null,
       "tracking": [],
       "evidence": [],
@@ -149,13 +149,15 @@
       "docs": []
     },
     "cab7bb4b29476cf4a70150f5f94ba97f22766b9a:sdk": {
-      "disposition": "NO_TARGET_CHANGE",
-      "reason": "the install-time frontmatter parse/reject path has no TS counterpart: src/skills/catalog.ts only statically types the SKILLS.md frontmatter and the TS port has no skill-install surface.",
+      "disposition": "DEFERRED",
+      "reason": "upstream rejects skill installs with unparsable frontmatter by wrapping Skill.load in a SkillValidationError and verifies no skill is installed (test_install_malformed_frontmatter_raises_validation_error). The TS Skill.load parses frontmatter at runtime and catalog loading invokes that parser, so the static-typing claim was inaccurate; but there is no install API surface to raise a validation error on, and no covering exclusion exists.",
       "policy": null,
-      "tracking": [],
+      "tracking": [
+        "cab7bb4b29476cf4a70150f5f94ba97f22766b9a"
+      ],
       "evidence": [],
-      "compatibilityConsequence": null,
-      "revisitTrigger": null,
+      "compatibilityConsequence": "Malformed skill frontmatter does not raise a SkillValidationError and does not prevent skill installation because the install surface is unimplemented.",
+      "revisitTrigger": "next interval or when a skill-install API surface is added under src/skills.",
       "docsImpact": "none",
       "docs": []
     },
@@ -173,11 +175,14 @@
       "docs": []
     },
     "3adf42f6377b570dfea53cc02bc669e1515f18f8:sdk": {
-      "disposition": "NO_TARGET_CHANGE",
-      "reason": "TS defaultMetaProfileDir() already resolves through getUserPersistenceDir(), which expands ~ and relative paths; the ~ expansion is already present",
+      "disposition": "PORT",
+      "reason": "upstream routes meta-profile storage through Path(...).expanduser(), so a bare `~` (and `~user`) OH_PERSISTENCE_DIR resolve like `~/state`. The TS getUserPersistenceDir only expanded a `~/` prefix; extended it to expand bare `~` and `~user` prefixes and added regression coverage.",
       "policy": null,
       "tracking": [],
-      "evidence": [],
+      "evidence": [
+        "src/utils/__tests__/utils.test.ts",
+        "src/meta-profiles/__tests__/meta-profile-store.test.ts"
+      ],
       "compatibilityConsequence": null,
       "revisitTrigger": null,
       "docsImpact": "none",
@@ -349,24 +354,28 @@
       "docs": []
     },
     "b301ee008178ec4a357d3c2bc6370495c6ce1e3f:sdk": {
-      "disposition": "NO_TARGET_CHANGE",
-      "reason": "delivers streamed deltas to RemoteConversation token_callbacks; TS remote conversation exposes no token_callbacks/streaming surface (REST-polling only)",
+      "disposition": "DEFERRED",
+      "reason": "upstream delivers streamed deltas to RemoteConversation token_callbacks and tests it with test_token_callbacks_receive_streamed_deltas. The TS RemoteConversation is REST-polling only and exposes no token-callback surface, so this observable behavior has no counterpart yet; REST history sync does not deliver those notifications. Not excluded by any policy.",
       "policy": null,
-      "tracking": [],
+      "tracking": [
+        "b301ee008178ec4a357d3c2bc6370495c6ce1e3f"
+      ],
       "evidence": [],
-      "compatibilityConsequence": null,
-      "revisitTrigger": null,
+      "compatibilityConsequence": "Hosts using the remote conversation surface cannot observe streamed token deltas (or receive token callbacks) that upstream delivers.",
+      "revisitTrigger": "next interval or when the remote conversation gains a streaming/callback transport surface in src/conversation.",
       "docsImpact": "none",
       "docs": []
     },
     "8ee5cba234d14f7841b52c3c8259a884a9179fdb:sdk": {
-      "disposition": "NO_TARGET_CHANGE",
-      "reason": "llm_profile_store.py and profile_refs.py belong to the agent-server profile store, not the SDK; src/profiles is schema-only (no LLMProfileStore, no referrer scan/rewrite), so the .json-alias guard has no TS counterpart.",
+      "disposition": "DEFERRED",
+      "reason": "both changed files (llm_profile_store.py and profile_refs.py) live under openhands-sdk/openhands/sdk/ and upstream adds the SDK test test_delete_llm_profile_blocked_through_json_alias, so this is SDK-owned reference-protection behavior, not an agent-server-only unit. It prevents deleting a referenced profile through its `.json` alias. The TS port has no LLMProfileStore/referrer scan, and missing store APIs do not establish an exclusion. The separate server delegation does not cover this SDK unit.",
       "policy": null,
-      "tracking": [],
+      "tracking": [
+        "8ee5cba234d14f7841b52c3c8259a884a9179fdb"
+      ],
       "evidence": [],
-      "compatibilityConsequence": null,
-      "revisitTrigger": null,
+      "compatibilityConsequence": "Deleting (or rewriting) an LLM profile through the `.json` alias is not guarded against referenced profiles; the reference-protection contract is unimplemented in the SDK layer.",
+      "revisitTrigger": "next interval or when a TS LLM profile store / profile-ref scanner is implemented under src/profiles.",
       "docsImpact": "none",
       "docs": []
     },
@@ -606,24 +615,28 @@
       "docs": []
     },
     "6ae64079cfd30cfe2f01a060c59168a4d650d883:sdk": {
-      "disposition": "NO_TARGET_CHANGE",
-      "reason": "extends redact_api_key_literals, a bare API-key-literal scanner the TS port does not implement; redactTextSecrets covers key=value, quoted-dict and anthropic-key literals only, so there is no literal list to extend",
+      "disposition": "PORT",
+      "reason": "redact_api_key_literals gains ghu_/ghs_/gho_ GitHub token prefixes, which also flows through upstream redact_text_secrets; the TS redactTextSecrets must redact the same literals. Ported the three prefixes and added regression coverage.",
       "policy": null,
       "tracking": [],
-      "evidence": [],
+      "evidence": [
+        "src/utils/__tests__/provider-redaction.test.ts"
+      ],
       "compatibilityConsequence": null,
       "revisitTrigger": null,
       "docsImpact": "none",
       "docs": []
     },
     "3f3294581ebf40f3bbe5b96aec1d28b7fec96226:sdk": {
-      "disposition": "NO_TARGET_CHANGE",
-      "reason": "replays events missed during a WebSocket reconnect; TS remote conversation has no WebSocket transport, so reconnect replay has no counterpart",
+      "disposition": "DEFERRED",
+      "reason": "upstream replays events missed during WebSocket reconnect to RemoteConversation callbacks exactly once (test_reconnect_replays_missed_events_to_callbacks_once). The TS RemoteConversation has no WebSocket transport, so reconnect replay/deduplication has no counterpart; REST history synchronization does not deliver those notifications. Not excluded by any policy.",
       "policy": null,
-      "tracking": [],
+      "tracking": [
+        "3f3294581ebf40f3bbe5b96aec1d28b7fec96226"
+      ],
       "evidence": [],
-      "compatibilityConsequence": null,
-      "revisitTrigger": null,
+      "compatibilityConsequence": "Events recorded while a remote transport is reconnecting, and exactly-once callback delivery/deduplication, are not implemented; hosts see no reconnect replay.",
+      "revisitTrigger": "next interval or when the remote conversation gains a WebSocket/callback transport surface in src/conversation.",
       "docsImpact": "none",
       "docs": []
     },
