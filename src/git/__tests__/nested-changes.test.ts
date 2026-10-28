@@ -113,4 +113,25 @@ describe('workspace Git change aggregation (upstream d5995133)', () => {
       { status: 'UPDATED', path: 'README.md' }, { status: 'ADDED', path: 'notes.txt' },
     ]);
   });
+
+  it('lists a repository subdirectory relative to it, excluding sibling changes (upstream 14f821bb)', async () => {
+    const root = await fixture(); await repository(root);
+    await mkdir(join(root, 'src'), { recursive: true });
+    await writeFile(join(root, 'src', 'app.py'), 'x = 1\n');
+    await writeFile(join(root, 'src', 'old.py'), 'old\n');
+    await git.runGitCommand(['git', 'add', '.'], { cwd: root });
+    await git.runGitCommand(['git', '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'init'], { cwd: root });
+
+    await writeFile(join(root, 'README.md'), 'hello\nedited\n');
+    await writeFile(join(root, 'notes.txt'), 'note\n');
+    await writeFile(join(root, 'src', 'app.py'), 'x = 2\n');
+    await rm(join(root, 'src', 'old.py'));
+    await writeFile(join(root, 'src', 'new.py'), 'new\n');
+
+    expect(await git.getChangesInRepo(join(root, 'src'), 'HEAD')).toEqual([
+      { status: 'UPDATED', path: 'app.py' },
+      { status: 'ADDED', path: 'new.py' },
+      { status: 'DELETED', path: 'old.py' },
+    ]);
+  });
 });

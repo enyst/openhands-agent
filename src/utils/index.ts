@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -25,10 +25,46 @@ export function getUserPersistenceDir(defaultDir?: string | null): string {
   // cannot split the state tree across call sites.
   const envDir = process.env.OH_PERSISTENCE_DIR?.trim();
   if (envDir !== undefined && envDir !== '') {
-    const expanded = envDir.startsWith('~/') ? path.join(homedir(), envDir.slice(2)) : envDir;
+    let expanded = envDir;
+    if (expanded.startsWith('~/')) {
+      expanded = path.join(homedir(), expanded.slice(2));
+    } else if (expanded.startsWith('~')) {
+      // Upstream Path.expanduser() also resolves a bare ``~`` and ``~user``
+      // prefixes, not only ``~/``.
+      const slash = expanded.indexOf('/');
+      const user = slash === -1 ? expanded.slice(1) : expanded.slice(1, slash);
+      const rest = slash === -1 ? '' : expanded.slice(slash);
+      const home = user === '' ? homedir() : namedUserHome(user);
+      expanded = home + rest;
+    }
     return path.isAbsolute(expanded) ? expanded : path.resolve(INITIAL_CWD, expanded);
   }
   return defaultDir ?? path.join(homedir(), '.openhands');
+}
+
+function namedUserHome(user: string): string {
+  if (process.platform === 'win32') return path.join(path.dirname(homedir()), user);
+
+  // Query the account database, including directory-service accounts on macOS.
+  const command = process.platform === 'darwin' ? '/usr/bin/id' : 'getent';
+  const args = process.platform === 'darwin' ? ['-P', '--', user] : ['passwd', '--', user];
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024 });
+  let record = result.status === 0 ? result.stdout.trim() : '';
+  let homeField = process.platform === 'darwin' ? 8 : 5;
+  if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
+    try {
+      record = readFileSync('/etc/passwd', 'utf8').split('\n').find((line) => line.split(':')[0] === user) ?? '';
+      homeField = 5;
+    } catch {
+      record = '';
+    }
+  }
+  const fields = record.split(':');
+  const home = fields[homeField];
+  if (fields[0] !== user || !home || !path.isAbsolute(home)) {
+    throw new Error('Could not determine home directory');
+  }
+  return home;
 }
 
 export class AsyncCallbackWrapper<TEvent = Event> {
@@ -379,6 +415,8 @@ export function redactUrlParams(url: string): string {
 
 const keyValueSecretPattern = /\b([A-Za-z0-9_.-]*(?:api[_-]?key|authorization|cookie|credential|password|secret|session|token|key)[A-Za-z0-9_.-]*)\s*=\s*("[^"]*"|'[^']*'|[^\s]+)/giu;
 const anthropicKeyPattern = /sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}/gu;
+// GitHub user-to-server / server-to-server / OAuth token prefixes (upstream 6ae64079).
+const githubTokenPattern = /\bgh[uso]_[A-Za-z0-9]{20,}/gu;
 
 // Pinned Python quoted-entry matcher: mixed/escaped quotes, Unicode keys and
 // multiline values. The quote pair is retained and public trailing text stays intact.
@@ -387,6 +425,7 @@ const quotedDictSecretPattern = /(?<head>(?<kq>\\?["'])[\p{L}\p{N}_-]*(?:key|sec
 export function redactTextSecrets(text: string): string {
   return redactUrlCredentialsInText(text)
     .replace(anthropicKeyPattern, '<redacted>')
+    .replace(githubTokenPattern, '<redacted>')
     .replace(keyValueSecretPattern, (_match: string, key: string) => `${key}=<redacted>`)
     .replace(quotedDictSecretPattern, '$<head>$<q><redacted>$<q>');
 }

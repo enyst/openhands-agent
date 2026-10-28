@@ -94,12 +94,46 @@ describe('path utilities', () => {
 
       process.env.OH_PERSISTENCE_DIR = 'relative/persist';
       expect(getUserPersistenceDir()).toBe(resolve('relative/persist'));
+
+      process.env.OH_PERSISTENCE_DIR = '~';
+      expect(getUserPersistenceDir()).toBe(homedir());
+
+      process.env.OH_PERSISTENCE_DIR = '~/state';
+      expect(getUserPersistenceDir()).toBe(join(homedir(), 'state'));
+
+      process.env.OH_PERSISTENCE_DIR = '~/~/nested';
+      expect(getUserPersistenceDir()).toBe(join(homedir(), '~', 'nested'));
     } finally {
       if (original === undefined) {
         delete process.env.OH_PERSISTENCE_DIR;
       } else {
         process.env.OH_PERSISTENCE_DIR = original;
       }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('resolves a named account through its actual home directory', async () => {
+    const original = process.env.OH_PERSISTENCE_DIR;
+    const rootHome = (await readFile('/etc/passwd', 'utf8')).split('\n')
+      .find((line) => line.startsWith('root:'))?.split(':')[5];
+    expect(rootHome).toBeTruthy();
+    try {
+      process.env.OH_PERSISTENCE_DIR = '~root/state';
+      expect(getUserPersistenceDir()).toBe(join(rootHome!, 'state'));
+    } finally {
+      if (original === undefined) delete process.env.OH_PERSISTENCE_DIR;
+      else process.env.OH_PERSISTENCE_DIR = original;
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects an unknown named account instead of inventing a home', () => {
+    const original = process.env.OH_PERSISTENCE_DIR;
+    try {
+      process.env.OH_PERSISTENCE_DIR = '~oh_nonexistent_account_71/state';
+      expect(() => getUserPersistenceDir()).toThrow('Could not determine home directory');
+    } finally {
+      if (original === undefined) delete process.env.OH_PERSISTENCE_DIR;
+      else process.env.OH_PERSISTENCE_DIR = original;
     }
   });
 
