@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -34,11 +34,37 @@ export function getUserPersistenceDir(defaultDir?: string | null): string {
       const slash = expanded.indexOf('/');
       const user = slash === -1 ? expanded.slice(1) : expanded.slice(1, slash);
       const rest = slash === -1 ? '' : expanded.slice(slash);
-      expanded = user === '' ? homedir() + rest : path.join(path.dirname(homedir()), user) + rest;
+      const home = user === '' ? homedir() : namedUserHome(user);
+      expanded = home + rest;
     }
     return path.isAbsolute(expanded) ? expanded : path.resolve(INITIAL_CWD, expanded);
   }
   return defaultDir ?? path.join(homedir(), '.openhands');
+}
+
+function namedUserHome(user: string): string {
+  if (process.platform === 'win32') return path.join(path.dirname(homedir()), user);
+
+  // Query the account database, including directory-service accounts on macOS.
+  const command = process.platform === 'darwin' ? '/usr/bin/id' : 'getent';
+  const args = process.platform === 'darwin' ? ['-P', '--', user] : ['passwd', '--', user];
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024 });
+  let record = result.status === 0 ? result.stdout.trim() : '';
+  let homeField = process.platform === 'darwin' ? 8 : 5;
+  if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
+    try {
+      record = readFileSync('/etc/passwd', 'utf8').split('\n').find((line) => line.split(':')[0] === user) ?? '';
+      homeField = 5;
+    } catch {
+      record = '';
+    }
+  }
+  const fields = record.split(':');
+  const home = fields[homeField];
+  if (fields[0] !== user || !home || !path.isAbsolute(home)) {
+    throw new Error('Could not determine home directory');
+  }
+  return home;
 }
 
 export class AsyncCallbackWrapper<TEvent = Event> {

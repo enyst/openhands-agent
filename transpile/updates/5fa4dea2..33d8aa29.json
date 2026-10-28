@@ -176,7 +176,7 @@
     },
     "3adf42f6377b570dfea53cc02bc669e1515f18f8:sdk": {
       "disposition": "PORT",
-      "reason": "upstream routes meta-profile storage through Path(...).expanduser(), so a bare `~` (and `~user`) OH_PERSISTENCE_DIR resolve like `~/state`. The TS getUserPersistenceDir only expanded a `~/` prefix; extended it to expand bare `~` and `~user` prefixes and added regression coverage.",
+      "reason": "upstream routes meta-profile storage through Path(...).expanduser(). TS now expands bare ~ and ~/state, resolves named POSIX users through the account database instead of guessing sibling directories, and rejects unknown accounts. Regression tests exercise the real root account and an unknown account; Windows retains its sibling-home expansion.",
       "policy": null,
       "tracking": [],
       "evidence": [
